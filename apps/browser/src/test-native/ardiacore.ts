@@ -301,11 +301,17 @@ export const vaultFakes = {
   providers: [] as FakeVaultProvider[],
   items: [] as FakeVaultItem[],
   copied: [] as { provider: string; id: string; field: string }[],
-  options: null as { idleLockMinutes: number; touchID: boolean; askBeforeFilling: boolean; loadPasswordsWhenUsed: boolean } | null,
+  refreshed: [] as string[],
+  options: null as { idleLockMinutes: number; touchID: boolean; askBeforeFilling: boolean; loadPasswordsWhenUsed: boolean; syncIntervalSeconds: number | null } | null,
   biometrics: true,
   signIns: [] as { provider: string; fields: Record<string, unknown> }[],
   unlocks: [] as { provider: string; withPassword: boolean }[],
   nextSignIn: null as Record<string, unknown> | null,
+  chromeProfiles: [] as CallResult<"vaults.googleProfiles">,
+  reveals: [] as (string | null)[],
+  googleAccount: { email: null, hasPassword: false } as CallResult<"vaults.googleAccount">,
+  googleSignIn: "signedIn" as CallResult<"vaults.googleSignIn">["state"],
+  googlePasswords: [] as string[],
 };
 const vaultState = (provider: string) => vaultFakes.providers.find((p) => p.id === provider)!;
 function setVaultState(provider: string, state: FakeVaultProvider["state"]) {
@@ -530,7 +536,7 @@ const fakeModules = {
     "vaults",
     {
       providers: () => vaultFakes.providers,
-      refresh: ({ provider }) => vaultState(provider),
+      refresh: ({ provider }) => (vaultFakes.refreshed.push(provider), vaultState(provider)),
       items: ({ provider }) => vaultFakes.items.filter((i) => (!provider || i.provider === provider) && vaultUnlocked(i.provider)),
       lock: ({ provider }) => setVaultState(provider, "locked"),
       signOut: ({ provider }) => setVaultState(provider, "signedOut"),
@@ -541,9 +547,16 @@ const fakeModules = {
       copy: ({ provider, id, field }) => (vaultFakes.copied.push({ provider, id, field }), { copied: true, clearsAfter: 90 }),
       totp: () => ({ code: "123456", period: 30, expiresAt: Date.now() + 30_000 }),
       generate: () => ({ length: 20 }),
-      setOptions: ({ idleLockMinutes, touchID, askBeforeFilling, loadPasswordsWhenUsed }) => ((vaultFakes.options = { idleLockMinutes, touchID, askBeforeFilling, loadPasswordsWhenUsed }), {}),
+      setOptions: ({ idleLockMinutes, touchID, askBeforeFilling, loadPasswordsWhenUsed, syncIntervalSeconds }) => (
+        (vaultFakes.options = { idleLockMinutes, touchID, askBeforeFilling, loadPasswordsWhenUsed, syncIntervalSeconds }), {}
+      ),
       biometrics: () => ({ available: vaultFakes.biometrics }),
       cancelSignIn: ({ provider }) => vaultState(provider),
+      googleProfiles: () => vaultFakes.chromeProfiles,
+      googleAccount: () => vaultFakes.googleAccount,
+      forgetGooglePassword: () => (vaultFakes.googleAccount = { email: null, hasPassword: false }),
+      googleSignIn: () => ({ state: vaultFakes.googleSignIn }),
+      googleReveal: ({ id }) => (vaultFakes.reveals.push(id ?? null), { revealed: true }),
     },
     {
       signIn: async (provider: string, fieldsJSON: string) => {
@@ -553,6 +566,11 @@ const fakeModules = {
       unlock: async (provider: string, password: string | null) => {
         vaultFakes.unlocks.push({ provider, withPassword: password !== null });
         return vaultSignInReply(provider);
+      },
+      saveGooglePassword: async (email: string, password: string) => {
+        vaultFakes.googlePasswords.push(email);
+        vaultFakes.googleAccount = { email, hasPassword: password.length > 0 };
+        return JSON.stringify({ ok: password.length > 0, error: password.length > 0 ? "" : "No password." });
       },
     },
   ),

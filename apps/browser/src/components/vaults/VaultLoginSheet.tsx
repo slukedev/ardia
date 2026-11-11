@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import type { VaultItem } from "../../state/vaults/types";
 import { copyFromManager, type VaultCopyOutcome } from "../../state/vaults/actions";
-import { brandOf } from "../../state/vaults/brands";
-import { useVaultProvider } from "../../state/vaults/hooks";
+import { brandOf, sourceLabel, syncingToLabel } from "../../state/vaults/brands";
+import { useLiveVaultItem, useVaultProvider } from "../../state/vaults/hooks";
 import { closeSettingsSheet } from "../../state/settings/sheet";
 import { copyText } from "../../state/app/system";
-import { Box, Button, DialogActions, DialogTitle, Sheet, space, Text } from "../ui";
+import { Box, Button, DialogActions, DialogTitle, Sheet, space, SyncGlyph, Text } from "../ui";
 import { Favicon } from "../favicon/Favicon";
 import { Group, Row } from "../settings/Form";
 import { BrandBadge } from "./VaultParts";
@@ -43,7 +43,12 @@ function CopyButton({ label, onCopy }: { label: string; onCopy: () => Promise<Va
   );
 }
 
-export function VaultLoginSheet({ item, site }: { item: VaultItem; site: string }) {
+export function VaultLoginSheet({ item: opened, site }: { item: VaultItem; site: string }) {
+  const live = useLiveVaultItem(opened);
+  const item = live ?? opened;
+  useEffect(() => {
+    if (opened.pending && !live) closeSettingsSheet();
+  }, [live]);
   const provider = useVaultProvider(item.provider);
   const name = provider?.name ?? brandOf(item.provider).name;
   const url = vaultItemUrl(item);
@@ -72,7 +77,14 @@ export function VaultLoginSheet({ item, site }: { item: VaultItem; site: string 
             </Box>
           </Row>
           <Row title="Saved In" icon={<BrandBadge provider={item.provider} />}>
-            <Text tone="textSecondary">{name}</Text>
+            {item.pending ? (
+              <Box row gap="xs" style={CENTER}>
+                <SyncGlyph active />
+                <Text tone="textSecondary">{syncingToLabel(item.provider)}</Text>
+              </Box>
+            ) : (
+              <Text tone="textSecondary">{sourceLabel(name, item.vault)}</Text>
+            )}
           </Row>
         </Group>
         {failed ? (

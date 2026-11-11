@@ -1,3 +1,4 @@
+import AppKit
 import ExpoModulesCore
 
 public class VaultsModule: Module {
@@ -8,6 +9,7 @@ public class VaultsModule: Module {
 
     OnCreate {
       VaultAutoLock.shared.start()
+      DispatchQueue.main.async { ChromeStoreWatcher.start() }
     }
 
     Self.calls.function
@@ -19,6 +21,13 @@ public class VaultsModule: Module {
           return promise.reject("ERR_BAD_ARGS", VaultsModule.unknown(provider))
         }
         promise.resolve(VaultJSON.text(result.jsonObject()))
+      }
+    }
+
+    AsyncFunction("saveGooglePassword") { (email: String, password: String, promise: Promise) in
+      Task {
+        let saved = GoogleAccountPassword.save(email: email, password: password)
+        promise.resolve(VaultJSON.text(["ok": saved, "error": saved ? "" : "Ardia couldn't keep your Google password in the keychain."]))
       }
     }
 
@@ -52,6 +61,11 @@ public class VaultsModule: Module {
 
   static func answer(_ reply: CallReply, _ work: @escaping @Sendable () async -> Any?) {
     Task { reply.ok(await work()) }
+  }
+
+  static func googleAccount() -> [String: Any] {
+    let email = GoogleAccountPassword.email()
+    return ["email": email ?? NSNull(), "hasPassword": email != nil]
   }
 
   static func copied(_ copied: Bool?) -> [String: Any] {
@@ -97,6 +111,19 @@ public class VaultsModule: Module {
       let item = try args.text("id")
       VaultsModule.answer(reply) { await VaultBroker.shared.totp(id, item: item)?.jsonObject() }
     },
+    "googleProfiles": { _, reply in reply.ok(GooglePasswordManagerVault.profileList(VaultSessionStore.shared)) },
+    "googleAccount": { _, reply in reply.ok(VaultsModule.googleAccount()) },
+    "forgetGooglePassword": { _, reply in
+      GoogleAccountPassword.forget()
+      reply.ok(VaultsModule.googleAccount())
+    },
+    "googleSignIn": { _, reply in
+      VaultsModule.answer(reply) { ["state": await GoogleWebImporter.shared.checkSignIn()] }
+    },
+    "googleReveal": { args, reply in
+      let id = try args.optionalText("id")
+      VaultsModule.answer(reply) { ["revealed": await GoogleWebImporter.shared.reveal(id)] }
+    },
     "biometrics": { _, reply in reply.ok(["available": VaultOwnerCheck.biometricsAvailable]) },
     "generate": { _, reply in reply.ok(["length": VaultPasswordGenerator.generate().count]) },
     "setOptions": { args, reply in
@@ -104,9 +131,11 @@ public class VaultsModule: Module {
       let touchID = try args.bool("touchID")
       let askBeforeFilling = try args.optionalBool("askBeforeFilling") ?? true
       let loadPasswordsWhenUsed = try args.optionalBool("loadPasswordsWhenUsed") ?? false
+      let syncIntervalSeconds = try args.optionalDouble("syncIntervalSeconds")
       let idle = minutes.isFinite ? Int(min(max(minutes, 0), 10_080)) : 30
       VaultsModule.answer(reply) {
-        await VaultBroker.shared.setOptions(idleLockMinutes: idle, touchID: touchID, askBeforeFilling: askBeforeFilling, loadPasswordsWhenUsed: loadPasswordsWhenUsed)
+        await VaultBroker.shared.setOptions(idleLockMinutes: idle, touchID: touchID, askBeforeFilling: askBeforeFilling, loadPasswordsWhenUsed: loadPasswordsWhenUsed,
+          syncIntervalSeconds: syncIntervalSeconds)
         return [String: Any]()
       }
     },

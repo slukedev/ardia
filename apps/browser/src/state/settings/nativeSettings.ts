@@ -3,6 +3,7 @@ import { setAutoPictureInPicture, setVideoUpscaling } from "../../platform/media
 import { setCommandScrollZoom } from "../../platform/siteSettings";
 import { setVaultOptions } from "../../platform/vaults";
 import { useBrowser } from "../browser/store";
+import { vaultSyncSeconds } from "../vaults/syncInterval";
 import type { Settings } from "./settings";
 
 type Mirror = { key: keyof Settings; send: (settings: Settings) => unknown };
@@ -15,8 +16,11 @@ const NATIVE_SETTINGS: Mirror[] = [
   mirror("autoPictureInPicture", setAutoPictureInPicture),
   mirror("videoUpscaling", setVideoUpscaling),
   mirror("commandScrollZoom", setCommandScrollZoom),
-  ...(["vaultIdleLockMinutes", "vaultTouchID", "vaultAskBeforeFilling", "vaultLoadPasswordsWhenUsed"] as const).map(
-    (key): Mirror => ({ key, send: (s) => setVaultOptions(s.vaultIdleLockMinutes, s.vaultTouchID, s.vaultAskBeforeFilling, s.vaultLoadPasswordsWhenUsed) }),
+  ...(["vaultIdleLockMinutes", "vaultTouchID", "vaultAskBeforeFilling", "vaultLoadPasswordsWhenUsed", "vaultSyncInterval"] as const).map(
+    (key): Mirror => ({
+      key,
+      send: (s) => setVaultOptions(s.vaultIdleLockMinutes, s.vaultTouchID, s.vaultAskBeforeFilling, s.vaultLoadPasswordsWhenUsed, vaultSyncSeconds(s.vaultSyncInterval)),
+    }),
   ),
 ];
 

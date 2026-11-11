@@ -1,6 +1,7 @@
 export const BRAND_ACCENTS: Record<string, string> = {
   "1password": "#0572EC",
   bitwarden: "#175DDC",
+  google: "#4285F4",
   protonpass: "#6D4AFF",
 };
 

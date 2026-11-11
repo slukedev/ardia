@@ -20,7 +20,7 @@ import type { ClearSiteDataResult, SiteSettings, SiteSettingType, SiteSettingVal
 import type { LinkRoute, TabStripCommand, TabStripTransaction } from "../tabs";
 import type { PageCookie, PageEngine, PasskeyAccess } from "../webkit";
 import type { DisplayMediaSource } from "../pageTypes";
-import type { VaultItem, VaultProviderId, VaultProviderState, VaultSecretField, VaultTotp } from "../vaults";
+import type { VaultChromeProfile, VaultGoogleAccount, VaultGoogleExport, VaultGoogleImport, VaultGoogleSignIn, VaultItem, VaultProviderId, VaultProviderState, VaultSecretField, VaultTotp } from "../vaults";
 
 type Profile = { profile: string };
 type Done = Record<string, never> | null;
@@ -199,8 +199,13 @@ export type EngineCalls = {
   "vaults.copy": [{ provider: VaultProviderId; id: string; field: VaultSecretField }, { copied: boolean; declined?: boolean; clearsAfter: number }];
   "vaults.totp": [{ provider: VaultProviderId; id: string }, VaultTotp | null];
   "vaults.generate": [{}, { length: number }];
-  "vaults.setOptions": [{ idleLockMinutes: number; touchID: boolean; askBeforeFilling: boolean; loadPasswordsWhenUsed: boolean }, Record<string, never>];
+  "vaults.setOptions": [{ idleLockMinutes: number; touchID: boolean; askBeforeFilling: boolean; loadPasswordsWhenUsed: boolean; syncIntervalSeconds: number | null }, Record<string, never>];
   "vaults.biometrics": [{}, { available: boolean }];
+  "vaults.googleProfiles": [{}, VaultChromeProfile[]];
+  "vaults.googleAccount": [{}, VaultGoogleAccount];
+  "vaults.forgetGooglePassword": [{}, VaultGoogleAccount];
+  "vaults.googleSignIn": [{}, { state: VaultGoogleSignIn }];
+  "vaults.googleReveal": [{ id?: string }, { revealed: boolean }];
 };
 
 export type EngineEvents = {
@@ -229,4 +234,7 @@ export type EngineEvents = {
   "vaults.changed": { provider: VaultProviderState };
   "vaults.itemsChanged": { provider: VaultProviderId };
   "vaults.touchID": Record<string, never>;
+  "vaults.googleImport": VaultGoogleImport;
+  "vaults.googleExport": VaultGoogleExport;
+  "vaults.googleSignIn": { provider: VaultProviderId; signedIn: boolean };
 };

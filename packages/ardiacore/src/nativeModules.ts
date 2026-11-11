@@ -23,6 +23,7 @@ export type ArdiaCoreNativeModules = {
   ArdiaVaults: {
     signIn(provider: string, fieldsJSON: string): Secret;
     unlock(provider: string, password: string | null): Secret;
+    saveGooglePassword(email: string, password: string): Secret;
   };
   ArdiaSwipe: SwipeModule;
 };

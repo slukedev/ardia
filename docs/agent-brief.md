@@ -318,6 +318,8 @@ The only variables the app and engine read, through `ArdiaLaunchConfig` (`packag
 | | `shadersKeyWindow` | Metal views act as in the key window (the New Tab intro) |
 | | `peekStrict` | Peek's test hooks stop relaxing its click checks |
 | | `importSecret=<s>` · `importDiaBundleId=<id>` · `importDiaWindows=<json>` | Import's Safe Storage secret · the app Dia's tabs come from (opened hidden and quit by the import) · fixture windows answering for it, with no Automation prompt |
+| | `googleChromeAccount=<email>` | Google Password Manager reads the real Chrome profile signed in as that email (and no other), with the real Chrome Safe Storage prompt; only when the owner asks for a signed-in test (`docs/password-managers.md`) |
+| | `googlePasswordsURL=<origin>` · `googleAccountsURL=<origin>` | Saving to Google drives these origins instead of passwords.google.com and accounts.google.com (both needed), for a local fixture of the import flow |
 | | `cliInstallScript=<path>` | Another `ardia` installer script |
 | | `legacySource=<home>` · `legacyCrashAfter=<step>` | The Netnyahoo → Ardia migration from a scratch home |
 | | `bangsUrl` · `onboarding` · `whatsNew` · `telemetry` · `liveMock=<url>` · `calendarFixture` | Debug builds only: bang list, run onboarding, show What's New, send telemetry, live folders from a mock, the calendar fixture |

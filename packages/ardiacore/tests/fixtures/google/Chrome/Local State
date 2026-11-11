@@ -1,0 +1,21 @@
+{
+  "profile": {
+    "info_cache": {
+      "Default": {
+        "name": "Person 1",
+        "user_name": "test@example.com",
+        "gaia_name": "Test User"
+      },
+      "Profile 1": {
+        "name": "Work",
+        "user_name": "",
+        "gaia_name": ""
+      }
+    },
+    "last_used": "Default",
+    "profiles_order": [
+      "Default",
+      "Profile 1"
+    ]
+  }
+}

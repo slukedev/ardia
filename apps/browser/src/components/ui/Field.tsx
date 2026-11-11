@@ -216,7 +216,7 @@ export function PopUp<T extends string>({
               borderColor: theme.controlBorder,
             }}
           >
-            <Text numberOfLines={1} style={{ flex: 1, ...typeScale.body, color: theme.textPrimary }}>
+            <Text numberOfLines={1} style={{ flexGrow: 1, flexShrink: 1, ...typeScale.body, color: theme.textPrimary }}>
               {current?.title ?? ""}
             </Text>
             <View style={{ width: 16, height: 16, borderRadius: radius.control, backgroundColor: theme.formAccent, alignItems: "center", justifyContent: "center" }}>

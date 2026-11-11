@@ -545,3 +545,286 @@ test("fields inside an open shadow root are classified through the composed path
 test("the vault block never writes into the DOM or logs", () => {
   assert.doesNotMatch(vaultBlock, /innerHTML|insertAdjacent|appendChild|textContent\s*=(?!=)|console\./);
 });
+
+const importStart = script.indexOf("  let setFileImport = () => {};\n  try {\n");
+const importEnd = script.indexOf("\n  } catch (e) {}\n\n  let setCsvExport", importStart);
+assert.ok(importStart > 0 && importEnd > importStart, "page_script.js has the file import block");
+const importBlock = script.slice(importStart + "  let setFileImport = () => {};\n  try {\n".length, importEnd);
+
+function makeImportPage({ origin = "https://passwords.google.com" } = {}) {
+  const sent = [];
+  const listeners = [];
+  const timers = [];
+  const nativeCalls = [];
+  class EventTarget {
+    addEventListener(type, fn, capture) {
+      listeners.push({ type, fn, capture });
+    }
+    dispatchEvent(e) {
+      (this.fired ||= []).push(e.type);
+      return true;
+    }
+  }
+  class HTMLInputElement extends EventTarget {
+    constructor(type, accept = "") {
+      super();
+      this._type = type;
+      this.accept = accept;
+      this._files = null;
+      this._value = "";
+    }
+    get type() {
+      return this._type;
+    }
+    get files() {
+      return this._files;
+    }
+    set files(v) {
+      this._files = v;
+    }
+    get value() {
+      return this._value;
+    }
+    set value(v) {
+      this._value = v;
+    }
+    click() {
+      nativeCalls.push(`click:${this._type}`);
+    }
+    showPicker() {
+      nativeCalls.push(`showPicker:${this._type}`);
+    }
+  }
+  class Event {
+    constructor(type, init) {
+      this.type = type;
+      this.bubbles = !!(init && init.bubbles);
+    }
+  }
+  class File {
+    constructor(parts, name, options) {
+      this.text = parts.join("");
+      this.name = name;
+      this.type = options.type;
+    }
+  }
+  class DataTransfer {
+    constructor() {
+      const list = [];
+      this.items = { add: (f) => list.push(f) };
+      this.files = list;
+    }
+  }
+  const window = new EventTarget();
+  window.showOpenFilePicker = async () => (nativeCalls.push("showOpenFilePicker"), []);
+  const handlers = Object.create(null);
+  const context = {
+    HTMLInputElement,
+    EventTarget,
+    Event,
+    File,
+    DataTransfer,
+    DOMException: class extends Error {},
+    window,
+    location: { origin },
+    document: { querySelectorAll: () => [] },
+    setTimeout: (fn, ms) => timers.push({ fn, ms }),
+    Reflect,
+    Promise,
+    String,
+    Array,
+    handlers,
+    isTop: true,
+    apply: Reflect.apply,
+    asNative: (native, call) => new Proxy(native, { apply: (target, self, args) => call(target, self, args) }),
+    guard: (fn) => (...args) => {
+      try {
+        return fn(...args);
+      } catch (e) {}
+    },
+    send: (kind, data) => sent.push({ kind, data }),
+  };
+  const api = runInNewContext(`let setFileImport = () => {};\n{\n${importBlock}\n}\n({ setFileImport: (on) => setFileImport(on) })`, context);
+  const settle = () => new Promise((r) => setImmediate(r));
+  return { ...context, api, sent, nativeCalls, timers, listeners, settle };
+}
+
+test("a file input clicked before the config arrives is held, then passed on to a normal page", async () => {
+  const page = makeImportPage();
+  const input = new page.HTMLInputElement("file");
+  input.click();
+  assert.deepEqual(page.nativeCalls, []);
+  page.api.setFileImport(false);
+  assert.deepEqual(page.nativeCalls, ["click:file"]);
+  input.click();
+  assert.deepEqual(page.nativeCalls, ["click:file", "click:file"]);
+  assert.equal(page.sent.length, 0);
+});
+
+test("a held click is let go after a moment when no config ever comes", () => {
+  const page = makeImportPage();
+  new page.HTMLInputElement("file").showPicker();
+  assert.equal(page.timers.length, 1);
+  assert.equal(page.timers[0].ms, 1500);
+  page.timers[0].fn();
+  assert.deepEqual(page.nativeCalls, ["showPicker:file"]);
+  page.api.setFileImport(false);
+  assert.deepEqual(page.nativeCalls, ["showPicker:file"]);
+});
+
+test("other inputs are never held", () => {
+  const page = makeImportPage();
+  new page.HTMLInputElement("checkbox").click();
+  assert.deepEqual(page.nativeCalls, ["click:checkbox"]);
+});
+
+test("in the import page the chooser never opens: native's CSV goes into the input with input and change", async () => {
+  const page = makeImportPage();
+  const input = new page.HTMLInputElement("file", ".csv");
+  input.click();
+  page.api.setFileImport(true);
+  assert.deepEqual(page.nativeCalls, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(page.sent)), [{ kind: "fileChooser", data: { id: "1", via: "input", accept: ".csv" } }]);
+  page.handlers.fileImport({ id: "1", name: "Ardia.csv", type: "text/csv", text: "name,url,username,password,note\n" });
+  await page.settle();
+  assert.equal(input.files.length, 1);
+  assert.equal(input.files[0].name, "Ardia.csv");
+  assert.equal(input.files[0].type, "text/csv");
+  assert.deepEqual(input.fired, ["input", "change"]);
+});
+
+test("a refused file leaves the input empty, and an unknown answer is ignored", async () => {
+  const page = makeImportPage();
+  page.api.setFileImport(true);
+  const input = new page.HTMLInputElement("file");
+  input.click();
+  page.handlers.fileImport({ id: "9", name: "x", text: "y" });
+  page.handlers.fileImport({ id: "1", refused: true });
+  await page.settle();
+  assert.equal(input.files, null);
+  assert.equal(input.fired, undefined);
+});
+
+test("showOpenFilePicker gets a handle to native's file only in the import page", async () => {
+  const page = makeImportPage();
+  page.api.setFileImport(true);
+  const picked = page.window.showOpenFilePicker();
+  page.handlers.fileImport({ id: "1", name: "Ardia.csv", type: "text/csv", text: "csv" });
+  const [handle] = await picked;
+  assert.equal(handle.kind, "file");
+  assert.equal((await handle.getFile()).text, "csv");
+  assert.deepEqual(page.nativeCalls, []);
+  const normal = makeImportPage();
+  normal.api.setFileImport(false);
+  await normal.window.showOpenFilePicker();
+  assert.deepEqual(normal.nativeCalls, ["showOpenFilePicker"]);
+});
+
+test("the challenge fill refuses outside the import page or for another origin", () => {
+  const page = makeImportPage({ origin: "https://accounts.google.com" });
+  const field = new page.HTMLInputElement("password");
+  field.isConnected = true;
+  field.getClientRects = () => [{}];
+  field.focus = () => {};
+  page.document.querySelectorAll = (q) => (q.includes("password") ? [field] : []);
+  assert.equal(page.handlers.fileImportFill({ id: "a", origin: "https://accounts.google.com", password: "pw" }), false);
+  page.api.setFileImport(true);
+  assert.equal(page.handlers.fileImportFill({ id: "b", origin: "https://evil.example", password: "pw" }), false);
+  assert.equal(field.value, "");
+  assert.equal(page.handlers.fileImportFill({ id: "c", origin: "https://accounts.google.com", password: "pw", fields: 'input[type="password"]', next: [] }), true);
+  assert.equal(field.value, "pw");
+  assert.deepEqual(field.fired, ["input", "change"]);
+  assert.equal(page.sent.length, 0);
+});
+
+const exportHead = "  let setCsvExport = () => {};\n  try {\n";
+const exportStart = script.indexOf(exportHead);
+const exportEnd = script.indexOf("\n  } catch (e) {}\n\n  handlers.config", exportStart);
+assert.ok(exportStart > 0 && exportEnd > exportStart, "page_script.js has the CSV export block");
+const exportBlock = script.slice(exportStart + exportHead.length, exportEnd);
+
+function makeExportPage({ origin = "https://passwords.google.com" } = {}) {
+  const sent = [];
+  const listeners = [];
+  const opened = [];
+  const clicked = [];
+  class Blob {
+    constructor(parts, options) {
+      this.parts = parts;
+      this.type = options && options.type;
+    }
+  }
+  class Element {
+    constructor(attrs = {}) {
+      this.attrs = attrs;
+    }
+    closest(selector) {
+      const a = this.attrs;
+      const hit = a.download !== undefined || /^(blob|data):/.test(a.href || "");
+      return selector.includes("a[download]") && hit ? this : null;
+    }
+  }
+  class HTMLAnchorElement extends Element {
+    click() {
+      clicked.push(this.attrs.href);
+    }
+  }
+  const window = {
+    Blob,
+    open: (url) => (opened.push(url), {}),
+    addEventListener: (type, fn, capture) => listeners.push({ type, fn, capture }),
+  };
+  const context = {
+    Blob,
+    HTMLAnchorElement,
+    Element,
+    EventTarget: { prototype: { addEventListener: function (type, fn, capture) { this.addEventListener(type, fn, capture); } } },
+    Event: { prototype: { preventDefault() { this.prevented = true; } } },
+    window,
+    location: { origin },
+    Reflect,
+    Proxy,
+    Array,
+    String,
+    isTop: true,
+    apply: Reflect.apply,
+    asNative: (native, call) => new Proxy(native, { apply: (target, self, args) => call(target, self, args) }),
+    send: (kind, data) => sent.push({ kind, data }),
+  };
+  const api = runInNewContext(`let setCsvExport = () => {};\n{\n${exportBlock}\n}\n({ setCsvExport: (o) => setCsvExport(o) })`, context);
+  return { ...context, api, sent, listeners, opened, clicked };
+}
+
+test("the export page hands Google's CSV to native in memory and leaves other blobs alone", () => {
+  const page = makeExportPage();
+  page.api.setCsvExport("https://passwords.google.com");
+  const blob = new page.window.Blob(["name,url,username,password,note\n", "a,https://a.example/,u,p,\n"], { type: "text/csv;charset=utf-8;" });
+  assert.ok(blob instanceof page.Blob);
+  new page.window.Blob(["<b>hi</b>"], { type: "text/html" });
+  assert.deepEqual(JSON.parse(JSON.stringify(page.sent)), [{ kind: "csvExport", data: { text: "name,url,username,password,note\na,https://a.example/,u,p,\n" } }]);
+});
+
+test("no hook outside the export page's own origin, or without the config", () => {
+  const other = makeExportPage({ origin: "https://evil.example" });
+  other.api.setCsvExport("https://passwords.google.com");
+  assert.equal(other.window.Blob, other.Blob);
+  const plain = makeExportPage();
+  plain.api.setCsvExport(null);
+  assert.equal(plain.window.Blob, plain.Blob);
+  assert.equal(plain.listeners.length, 0);
+});
+
+test("in the export page a download link, a blob window or a download click goes nowhere", () => {
+  const page = makeExportPage();
+  page.api.setCsvExport("https://passwords.google.com");
+  new page.HTMLAnchorElement({ href: "blob:https://passwords.google.com/1", download: "Google Passwords.csv" }).click();
+  new page.HTMLAnchorElement({ href: "https://passwords.google.com/help" }).click();
+  assert.deepEqual(page.clicked, ["https://passwords.google.com/help"]);
+  assert.equal(page.window.open("blob:https://passwords.google.com/1"), null);
+  page.window.open("https://support.google.com/");
+  assert.deepEqual(page.opened, ["https://support.google.com/"]);
+  const capture = page.listeners.find((l) => l.type === "click" && l.capture);
+  const event = { target: new page.Element({ href: "data:text/csv,x" }), preventDefault: page.Event.prototype.preventDefault };
+  capture.fn(event);
+  assert.equal(event.prevented, true);
+});

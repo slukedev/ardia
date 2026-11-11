@@ -8,6 +8,9 @@ protocol VaultProvider: Sendable {
   var install: VaultInstall { get }
   var setup: VaultSetup? { get }
   var environment: [String: String] { get }
+  var notInstalledMessage: String { get }
+
+  func locate() -> VaultLocation?
 
   func isolatedEnvironment(_ directory: String) -> [String: String]
   func state(_ cli: VaultCLI) async -> VaultProviderState
@@ -22,15 +25,13 @@ protocol VaultProvider: Sendable {
   func save(_ cli: VaultCLI, login: VaultNewLogin) async throws -> VaultItem
 }
 
-struct VaultItemList: Sendable {
-  var items: [VaultItem]
-  var passwords: [String: String] = [:]
-}
-
 extension VaultProvider {
   func itemsAndPasswords(_ cli: VaultCLI) async throws -> VaultItemList { VaultItemList(items: try await items(cli)) }
   var setup: VaultSetup? { nil }
   var environment: [String: String] { [:] }
+  var notInstalledMessage: String { "\(name)'s command-line tool isn't installed." }
+
+  func locate() -> VaultLocation? { VaultBinaryLocator.locate(binaryName).map(VaultLocation.binary) }
 
   func isolatedEnvironment(_ directory: String) -> [String: String] { [:] }
   func lock(_ cli: VaultCLI) async {}

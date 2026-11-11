@@ -5,12 +5,19 @@ export type VaultBrand = { id: string; name: string; symbol: string; install: st
 export const VAULT_BRANDS: readonly VaultBrand[] = [
   { id: "1password", name: "1Password", symbol: "key.horizontal.fill", install: "brew install --cask 1password-cli" },
   { id: "bitwarden", name: "Bitwarden", symbol: "shield.lefthalf.filled", install: "brew install bitwarden-cli" },
+  { id: "google", name: "Google Password Manager", symbol: "g.circle.fill", install: "" },
   { id: "protonpass", name: "Proton Pass", symbol: "lock.shield.fill", install: "brew install protonpass/tap/pass-cli" },
 ];
 
 const FALLBACK_SYMBOL = "key.fill";
 
 export const brandOf = (id: string): VaultBrand => VAULT_BRANDS.find((b) => b.id === id) ?? { id, name: id, symbol: FALLBACK_SYMBOL, install: "" };
+
+const SHORT_NAMES: Record<string, string> = { google: "Google" };
+
+export const shortBrandName = (id: string) => SHORT_NAMES[id] ?? brandOf(id).name;
+
+export const syncingToLabel = (id: string) => `Syncing to ${shortBrandName(id)}`;
 
 export const brandAccent = (id: string) => BRAND_ACCENTS[id] ?? NEUTRAL_BRAND_ACCENT;
 
@@ -21,3 +28,5 @@ export const brandRank = (id: string) => {
 
 export const byBrandOrder = <T extends { id: string; name: string }>(list: readonly T[]): T[] =>
   [...list].sort((a, b) => brandRank(a.id) - brandRank(b.id) || a.name.localeCompare(b.name));
+
+export const sourceLabel = (name: string, vault?: string) => (vault ? `${name} · ${vault}` : name);

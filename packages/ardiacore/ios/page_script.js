@@ -1451,7 +1451,172 @@
     };
   } catch (e) {}
 
+  let setFileImport = () => {};
+  try {
+    if (isTop) {
+      const InputProto = HTMLInputElement.prototype;
+      const typeGetter = Reflect.getOwnPropertyDescriptor(InputProto, "type").get;
+      const filesSetter = Reflect.getOwnPropertyDescriptor(InputProto, "files").set;
+      const valueSetter = Reflect.getOwnPropertyDescriptor(InputProto, "value").set;
+      const nativeClick = InputProto.click;
+      const nativeShowPicker = InputProto.showPicker;
+      const nativeOpenPicker = window.showOpenFilePicker;
+      const dispatchOn = EventTarget.prototype.dispatchEvent;
+      const listenOn = EventTarget.prototype.addEventListener;
+      const ImportEvent = Event;
+      const ImportFile = File;
+      const ImportTransfer = DataTransfer;
+      const holdMs = 1500;
+      let mode = null;
+      let seq = 0;
+      const held = [];
+      const waiting = new Map();
+      const isFileInput = (el) => {
+        try {
+          return el instanceof HTMLInputElement && apply(typeGetter, el, []) === "file";
+        } catch (e) {
+          return false;
+        }
+      };
+      const fire = (el, type) => apply(dispatchOn, el, [new ImportEvent(type, { bubbles: true, composed: true })]);
+      const ask = (via, accept) =>
+        new Promise((resolve) => {
+          const id = String(++seq);
+          waiting.set(id, resolve);
+          send("fileChooser", { id, via, accept: typeof accept === "string" ? accept.slice(0, 200) : "" });
+        });
+      const fileOf = (answer) => (answer && typeof answer.text === "string" ? new ImportFile([answer.text], answer.name || "file", { type: answer.type || "" }) : null);
+      const intoInput = (el) =>
+        ask("input", el.accept).then((answer) => {
+          const file = fileOf(answer);
+          if (!file) return;
+          const transfer = new ImportTransfer();
+          transfer.items.add(file);
+          apply(filesSetter, el, [transfer.files]);
+          fire(el, "input");
+          fire(el, "change");
+        });
+      const pick = (el, via, native) => {
+        if (mode === false) return native();
+        if (mode === true) return void intoInput(el);
+        const entry = { el, via, native, done: false };
+        held.push(entry);
+        setTimeout(() => {
+          if (entry.done) return;
+          entry.done = true;
+          native();
+        }, holdMs);
+      };
+      setFileImport = (on) => {
+        mode = on;
+        for (const entry of held.splice(0)) {
+          if (entry.done) continue;
+          entry.done = true;
+          if (on) void intoInput(entry.el);
+          else guard(entry.native)();
+        }
+      };
+      InputProto.click = asNative(nativeClick, (target, self, args) => (isFileInput(self) ? pick(self, "click", () => apply(target, self, args)) : apply(target, self, args)));
+      if (nativeShowPicker)
+        InputProto.showPicker = asNative(nativeShowPicker, (target, self, args) => (isFileInput(self) ? pick(self, "showPicker", () => apply(target, self, args)) : apply(target, self, args)));
+      if (nativeOpenPicker)
+        window.showOpenFilePicker = asNative(nativeOpenPicker, (target, self, args) => {
+          if (mode !== true) return apply(target, self, args);
+          return ask("showOpenFilePicker", "").then((answer) => {
+            const file = fileOf(answer);
+            if (!file) throw new DOMException("The user aborted a request.", "AbortError");
+            const handle = { kind: "file", name: file.name, getFile: async () => file, queryPermission: async () => "granted", requestPermission: async () => "granted", isSameEntry: async () => false };
+            return [handle];
+          });
+        });
+      apply(listenOn, window, [
+        "click",
+        (e) => {
+          if (mode !== true || !isFileInput(e.target)) return;
+          e.preventDefault();
+          void intoInput(e.target);
+        },
+        true,
+      ]);
+      handlers.fileImport = (answer) => {
+        const resolve = answer && waiting.get(answer.id);
+        if (!resolve) return;
+        waiting.delete(answer.id);
+        resolve(answer.refused ? null : answer);
+      };
+      handlers.fileImportFill = (message) => {
+        let filled = false;
+        if (mode === true && message && message.origin === location.origin && typeof message.password === "string") {
+          const visible = (el) => el.isConnected && el.getClientRects().length > 0 && !el.disabled;
+          const field = Array.from(document.querySelectorAll(message.fields || 'input[type="password"]')).find(visible);
+          if (field) {
+            field.focus();
+            apply(valueSetter, field, [message.password]);
+            fire(field, "input");
+            fire(field, "change");
+            filled = true;
+            const byQuery = (message.next || []).map((q) => Array.from(document.querySelectorAll(q)).find(visible)).find(Boolean);
+            const byText = Array.from(document.querySelectorAll("button, [role=button]")).find((b) => visible(b) && (b.innerText || "").trim() === message.nextText);
+            const next = byQuery || byText;
+            setTimeout(() => (next ? next.click() : field.form && field.form.requestSubmit && field.form.requestSubmit()), 50);
+          }
+        }
+        return filled;
+      };
+    }
+  } catch (e) {}
+
+  let setCsvExport = () => {};
+  try {
+    if (isTop) {
+      const NativeBlob = Blob;
+      const AnchorProto = HTMLAnchorElement.prototype;
+      const nativeAnchorClick = AnchorProto.click;
+      const nativeOpen = window.open;
+      const closestOf = Element.prototype.closest;
+      const listenFor = EventTarget.prototype.addEventListener;
+      const stopEvent = Event.prototype.preventDefault;
+      const downloadLinks = 'a[download], a[href^="blob:"], a[href^="data:"], area[download]';
+      let exporting = false;
+      const isDownloadLink = (el) => {
+        try {
+          return !!el && apply(closestOf, el, [downloadLinks]) !== null;
+        } catch (e) {
+          return false;
+        }
+      };
+      const capture = (parts, options) => {
+        try {
+          const type = options && typeof options.type === "string" ? options.type.toLowerCase() : "";
+          if (!type.startsWith("text/csv") || !Array.isArray(parts) || !parts.length || !parts.every((part) => typeof part === "string")) return;
+          send("csvExport", { text: parts.join("") });
+        } catch (e) {}
+      };
+      setCsvExport = (origin) => {
+        if (exporting || typeof origin !== "string" || origin !== location.origin) return;
+        exporting = true;
+        window.Blob = new Proxy(NativeBlob, {
+          construct(target, args, newTarget) {
+            capture(args[0], args[1]);
+            return Reflect.construct(target, args, newTarget);
+          },
+        });
+        AnchorProto.click = asNative(nativeAnchorClick, (target, self, args) => (isDownloadLink(self) ? undefined : apply(target, self, args)));
+        window.open = asNative(nativeOpen, (target, self, args) => (/^\s*(blob|data):/i.test(String(args[0] || "")) ? null : apply(target, self, args)));
+        apply(listenFor, window, [
+          "click",
+          (e) => {
+            if (isDownloadLink(e.target)) apply(stopEvent, e, []);
+          },
+          true,
+        ]);
+      };
+    }
+  } catch (e) {}
+
   handlers.config = (config) => {
+    setFileImport(config.fileImport === true);
+    setCsvExport(config.csvExport === true ? config.csvExportOrigin : null);
     handlers.peekConfig({ modifier: config.peek, split: config.split, trace: config.peekTrace, otherSites: config.peekOtherSites });
     blockAutoplay = !!config.blockAutoplay;
     pipTrace = !!config.pipTrace;

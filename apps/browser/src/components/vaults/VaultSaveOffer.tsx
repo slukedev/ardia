@@ -3,7 +3,7 @@ import { showMenu } from "../../state/app/system";
 import { brandOf } from "../../state/vaults/brands";
 import { useVaultProviders, useVaultSaveOffer } from "../../state/vaults/hooks";
 import { siteLabel } from "../../state/vaults/originMatch";
-import { chooseVaultTarget, dismissVaultOffer, saveVaultOffer } from "../../state/vaults/saveOffer";
+import { chooseVaultTarget, dismissVaultOffer, runVaultOfferAction, saveVaultOffer } from "../../state/vaults/saveOffer";
 import { Favicon } from "../favicon/Favicon";
 import { PromptBody } from "../site/Prompts";
 import { usePromptInputGuard, Well } from "../site/PromptParts";
@@ -56,15 +56,22 @@ export function VaultSaveOffer({ tabId, right, top }: { tabId: string; right: nu
                 </Box>
               ) : null}
               {offer.error ? (
-                <Text size="caption" tone="destructive">
-                  {offer.error}
-                </Text>
+                <Box gap="xs">
+                  <Text size="caption" tone={offer.action === "confirm" ? "textSecondary" : "destructive"}>
+                    {offer.error}
+                  </Text>
+                  {offer.action ? (
+                    <View style={START}>
+                      <Button variant="text" look="link" size="caption" title={ACTION_TITLES[offer.action]} onPress={guard(() => runVaultOfferAction(tabId))} />
+                    </View>
+                  ) : null}
+                </Box>
               ) : null}
             </>
           }
         >
           <Button variant="pill" title="Not Now" onPress={guard(() => dismissVaultOffer(tabId))} />
-          <Button variant="pill" title={offer.busy ? "Saving…" : "Save"} primary onPress={guard(() => void saveVaultOffer(tabId))} />
+          <Button variant="pill" title={offer.action === "confirm" ? "Waiting…" : offer.busy ? "Saving…" : "Save"} primary onPress={guard(() => void saveVaultOffer(tabId))} />
         </PromptBody>
         <PanelCloseButton onPress={guard(() => dismissVaultOffer(tabId))} />
       </View>
@@ -72,6 +79,8 @@ export function VaultSaveOffer({ tabId, right, top }: { tabId: string; right: nu
   );
 }
 
+const ACTION_TITLES = { confirm: "Confirm…", updatePassword: "Update Password…" } as const;
 const FILL = { flex: 1, minWidth: 0 } as const;
+const START = { alignSelf: "flex-start" } as const;
 const LEFT = { justifyContent: "flex-start" } as const;
 const BETWEEN = { justifyContent: "space-between" } as const;

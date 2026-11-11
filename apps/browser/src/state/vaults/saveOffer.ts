@@ -1,16 +1,19 @@
 import { create } from "zustand";
-import type { VaultItem, VaultProviderState } from "../../platform/vaults";
+import { revealGooglePage, saveOutcome, type VaultItem, type VaultProviderState } from "../../platform/vaults";
 import { webviews } from "../../platform/webviews";
 import { showToast } from "../app/toasts";
 import { useBrowser } from "../browser/store";
 import { patchPage, pageOf } from "../tabs/pageState";
 import { brandOf } from "./brands";
+import { requestGooglePasswordSheet } from "./google";
+import { GOOGLE_CONFIRM_TEXT, GOOGLE_SAVED_TITLE, noteGoogleImportSaved, noteGoogleImportWaiting, setGoogleImportOfferHooks } from "./googleImport";
 import { isSecureOrigin, loginSavedIn, sameSite, siteLabel } from "./originMatch";
 import { PENDING_TOTP_MS } from "./pendingTotp";
 import { allVaultItems, currentVaultProviders, loadAllVaultItems, loadVaultItems, vaultProviderOf } from "./store";
 import type { VaultSubmittedEvent } from "./types";
 
-export type VaultSaveOffer = { seq: number; origin: string; username: string; targets: string[]; target: string; busy: boolean; error: string | null };
+export type VaultSaveOffer = { seq: number; origin: string; username: string; targets: string[]; target: string; busy: boolean; error: string | null; action?: VaultOfferAction; importId?: string };
+export type VaultOfferAction = "confirm" | "updatePassword";
 
 export const useVaultSaveOffers = create<Record<string, VaultSaveOffer | null>>()(() => ({}));
 
@@ -90,7 +93,7 @@ const patchOffer = (tabId: string, s: number, patch: Partial<VaultSaveOffer>) =>
 
 export const chooseVaultTarget = (tabId: string, target: string) => {
   const offer = offerOf(tabId);
-  if (offer && offer.targets.includes(target)) patchOffer(tabId, offer.seq, { target, error: null });
+  if (offer && offer.targets.includes(target)) patchOffer(tabId, offer.seq, { target, error: null, action: undefined, importId: undefined });
 };
 
 export function dismissVaultOffer(tabId: string) {
@@ -104,13 +107,44 @@ export async function saveVaultOffer(tabId: string) {
   const offer = offerOf(tabId);
   const web = webviews.get(tabId);
   if (!offer || offer.busy) return;
-  const name = vaultProviderOf(offer.target)?.name ?? brandOf(offer.target).name;
-  patchOffer(tabId, offer.seq, { busy: true, error: null });
+  const provider = vaultProviderOf(offer.target);
+  const name = provider?.name ?? brandOf(offer.target).name;
+  patchOffer(tabId, offer.seq, { busy: true, error: null, action: undefined, importId: undefined });
   const result = web ? await web.saveToVault({ provider: offer.target, origin: offer.origin, title: siteLabel(offer.origin) }).catch(() => null) : null;
   if (offerOf(tabId)?.seq !== offer.seq) return;
-  if (!result?.saved) return patchOffer(tabId, offer.seq, { busy: false, error: `Couldn't save to ${name}. Try again.` });
+  const outcome = saveOutcome(result);
+  if (outcome.kind === "confirm") {
+    noteGoogleImportWaiting(outcome.importId, tabId, offer.seq);
+    return patchOffer(tabId, offer.seq, { busy: true, error: GOOGLE_CONFIRM_TEXT, action: "confirm", importId: outcome.importId });
+  }
+  if (outcome.kind === "failed") return patchOffer(tabId, offer.seq, { busy: false, error: outcome.error || `Couldn't save to ${name}. Try again.`, action: outcome.action });
   setOffer(tabId, null);
   void loadVaultItems(offer.target, true);
+  if (outcome.importId) return noteGoogleImportSaved(outcome.importId, tabId, offer.seq);
   const windowId = useBrowser.getState().tabs[tabId]?.windowId;
-  if (windowId) showToast(windowId, `Saved to ${name}`, undefined, { icon: "checkmark.circle.fill" });
+  if (windowId) showToast(windowId, offer.target === "google" ? GOOGLE_SAVED_TITLE : `Saved to ${name}`, undefined, { icon: "checkmark.circle.fill" });
 }
+
+export function runVaultOfferAction(tabId: string) {
+  const offer = offerOf(tabId);
+  if (offer?.action === "confirm" && offer.importId) return void revealGooglePage(offer.importId).catch(() => false);
+  if (offer?.action === "updatePassword") requestGooglePasswordSheet();
+}
+
+setGoogleImportOfferHooks({
+  saved: (tabId, s) => {
+    if (offerOf(tabId)?.seq !== s) return false;
+    setOffer(tabId, null);
+    return true;
+  },
+  failed: (tabId, s, error, action) => {
+    if (offerOf(tabId)?.seq !== s) return false;
+    patchOffer(tabId, s, { busy: false, error, action, importId: undefined });
+    return true;
+  },
+  confirm: (tabId, s, importId) => {
+    if (offerOf(tabId)?.seq !== s) return false;
+    patchOffer(tabId, s, { busy: true, error: GOOGLE_CONFIRM_TEXT, action: "confirm", importId });
+    return true;
+  },
+});

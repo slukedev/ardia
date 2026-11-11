@@ -10,8 +10,8 @@ import {
 } from "../../../state/site/passwords";
 import { orWarn } from "../../../lib/fallback";
 import { confirm, copyText } from "../../../state/app/system";
-import { Box, Button, DialogActions, DialogTitle, SearchField, Sheet, space, Symbol, Text, TextField, Toggle } from "../../ui";
-import { useEffect, useRef, useState } from "react";
+import { Box, Button, DialogActions, DialogTitle, SearchField, Sheet, space, Symbol, SyncGlyph, Text, TextField, Toggle } from "../../ui";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { useTheme } from "../../ui/theme";
 import { currentEngineProfile } from "../../../state/browser/current";
@@ -25,11 +25,12 @@ import { passwordAutofill, setPasswordAutofillFor } from "../../../state/setting
 import { useResource } from "../../../state/settings/resources";
 import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
 import { PasswordManagersSection } from "./PasswordManagers";
-import { useVaultLogins } from "../../../state/vaults/hooks";
+import { useAnyVaultSyncing, useVaultLogins } from "../../../state/vaults/hooks";
+import { itemKey, twinVaults } from "../../../state/vaults/menuModel";
 import { loadAllVaultItems } from "../../../state/vaults/store";
 import { siteLabel } from "../../../state/vaults/originMatch";
 import type { VaultItem } from "../../../state/vaults/types";
-import { brandOf } from "../../../state/vaults/brands";
+import { brandOf, sourceLabel, syncingToLabel } from "../../../state/vaults/brands";
 import { BrandBadge } from "../../vaults/VaultParts";
 import { VaultLoginSheet, vaultItemUrl } from "../../vaults/VaultLoginSheet";
 
@@ -77,6 +78,8 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
   };
 
   const vaultLogins = useVaultLogins();
+  const vaultsSyncing = useAnyVaultSyncing();
+  const twins = useMemo(() => twinVaults(vaultLogins), [vaultLogins]);
   useEffect(() => {
     if (unlocked) void loadAllVaultItems();
   }, [unlocked]);
@@ -122,7 +125,11 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
         </Box>
       ) : (
         <>
-          <SectionHeader title={list ? plural(entries.length, "Saved Password") : "Saved Passwords"} action={<SearchField value={query} onChangeText={setQuery} placeholder="Search" width={200} />} />
+          <SectionHeader
+            title={list ? plural(entries.length, "Saved Password") : "Saved Passwords"}
+            accessory={<SyncGlyph active={vaultsSyncing} />}
+            action={<SearchField value={query} onChangeText={setQuery} placeholder="Search" width={200} />}
+          />
           <Group>
             {list && shown.length === 0 ? (
               <Row title={query ? "No passwords match" : "No saved passwords"} />
@@ -132,12 +139,17 @@ export function PasswordsPane({ profileId: initial }: { profileId?: string | nul
                   key={e.key}
                   icon={e.url ? <Favicon url={e.url} /> : <BrandBadge provider={e.item?.provider ?? ""} />}
                   title={e.site}
-                  description={e.username || "(no username)"}
+                  description={sourceLabel(e.username || "(no username)", e.item ? twins.get(itemKey(e.item)) : undefined)}
                   onPress={() =>
                     showSettingsSheet(e.saved ? <PasswordSheet profile={profile} saved={e.saved} onChanged={load} /> : <VaultLoginSheet item={e.item!} site={e.site} />)
                   }
                 >
-                  {e.item ? <BrandBadge provider={e.item.provider} tooltip={brandOf(e.item.provider).name} /> : null}
+                  {e.item ? (
+                    <Box row gap="s" center>
+                      {e.item.pending ? <SyncGlyph active tooltip={syncingToLabel(e.item.provider)} label={syncingToLabel(e.item.provider)} /> : null}
+                      <BrandBadge provider={e.item.provider} tooltip={sourceLabel(brandOf(e.item.provider).name, e.item.vault)} />
+                    </Box>
+                  ) : null}
                 </Row>
               ))
             )}

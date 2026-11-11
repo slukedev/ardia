@@ -4,11 +4,12 @@ import type { VaultHighlight } from "../../state/vaults/highlight";
 import type { VaultRow } from "../../state/vaults/menuModel";
 import { itemKey } from "../../state/vaults/menuModel";
 import { siteLabel } from "../../state/vaults/originMatch";
+import { syncingToLabel } from "../../state/vaults/brands";
 import { forgetVaultCode, loadVaultCode } from "../../state/vaults/codes";
 import { noteCodeUnavailable } from "../../state/vaults/fill";
 import { noteVaultMenuPress } from "../../state/vaults/menu";
 import { useVaultCode, useVaultProvider } from "../../state/vaults/hooks";
-import { ActivitySpinner, ink, Symbol, tabularNums, Text, useTheme, withAlpha } from "../ui";
+import { ActivitySpinner, ink, Symbol, SyncGlyph, tabularNums, Text, useTheme, withAlpha } from "../ui";
 import { CountdownRing, formatCode, VaultAppIcon } from "./VaultParts";
 import { VAULT_MENU } from "./tokens";
 
@@ -129,12 +130,18 @@ export function VaultRowView({
     case "login": {
       const where = itemSite(row.item.urls) || site;
       const title = row.item.username || row.item.title || where;
-      const detail = row.item.username ? where : row.item.title ? where : "";
+      const place = row.item.username ? where : row.item.title ? where : "";
+      const detail = row.vault ? (place ? `${place} · ${row.vault}` : row.vault) : place;
       return shell((ink) => (
         <>
           <VaultAppIcon provider={row.item.provider} />
           <Lines title={title} detail={detail || undefined} ink={ink} />
-          {spinner ?? (touchSlot ? <Symbol name="touchid" size={VAULT_MENU.touchID} color={ink.title} style={TOUCH_ID} /> : null)}
+          {spinner ??
+            (touchSlot ? (
+              <Symbol name="touchid" size={VAULT_MENU.touchID} color={ink.title} style={TOUCH_ID} />
+            ) : row.item.pending ? (
+              <SyncGlyph active size="caption" color={ink.detail} tooltip={syncingToLabel(row.item.provider)} label={syncingToLabel(row.item.provider)} />
+            ) : null)}
         </>
       ));
     }

@@ -7,7 +7,7 @@ export type VaultRow =
   | { key: string; kind: "generate" }
   | { key: string; kind: "otp"; item: VaultItem; pending: boolean }
   | { key: string; kind: "unlock"; provider: string; name: string }
-  | { key: string; kind: "login"; item: VaultItem; userChose: boolean }
+  | { key: string; kind: "login"; item: VaultItem; userChose: boolean; vault?: string }
   | { key: string; kind: "allPasswords" }
   | { key: string; kind: "suggest" }
   | { key: string; kind: "settings" };
@@ -34,6 +34,22 @@ const OTHER_PASSWORDS: VaultRow = { key: "allPasswords", kind: "allPasswords" };
 const SETTINGS: VaultRow = { key: "settings", kind: "settings" };
 const SUGGEST: VaultRow = { key: "suggest", kind: "suggest" };
 
+const twinKey = (item: VaultItem) => `${item.username.trim().toLowerCase()}\n${(item.urls[0] ?? "").trim().toLowerCase()}`;
+
+export const liveItemOf = (items: readonly VaultItem[], item: VaultItem): VaultItem | null =>
+  items.find((i) => i.id === item.id) ?? items.find((i) => twinKey(i) === twinKey(item)) ?? null;
+
+export function twinVaults(items: readonly VaultItem[]): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const i of items) counts.set(twinKey(i), (counts.get(twinKey(i)) ?? 0) + 1);
+  return new Map(items.filter((i) => i.vault && (counts.get(twinKey(i)) ?? 0) > 1).map((i) => [itemKey(i), i.vault!]));
+}
+
+export function labelTwins(rows: VaultRow[]): VaultRow[] {
+  const vaults = twinVaults(rows.flatMap((r) => (r.kind === "login" ? [r.item] : [])));
+  return rows.map((r) => (r.kind === "login" && vaults.has(itemKey(r.item)) ? { ...r, vault: vaults.get(itemKey(r.item)) } : r));
+}
+
 export const hasMatchRow = (rows: readonly VaultRow[]) => rows.some((r) => r.kind === "login" || r.kind === "otp" || r.kind === "generate" || r.kind === "unlock");
 
 function codeRows(input: MenuInput, ranked: ReturnType<typeof rankItems>): VaultRow[] {
@@ -57,13 +73,13 @@ export function menuRows(input: MenuInput): VaultRow[] {
   const items = input.items.filter((i) => unlocked.has(i.provider));
   if (input.mode === "search") {
     const ranked = new Map(rankItems(items, input.origin).map((r) => [itemKey(r.item), r.tier]));
-    return searchItems(items, input.query, MAX_SEARCH_ROWS).map((item) => loginRow(item, (ranked.get(itemKey(item)) ?? TIER.none) < TIER.subdomain));
+    return labelTwins(searchItems(items, input.query, MAX_SEARCH_ROWS).map((item) => loginRow(item, (ranked.get(itemKey(item)) ?? TIER.none) < TIER.subdomain)));
   }
   const rows: VaultRow[] = [];
   if (input.field === "newPassword" && unlocked.size) rows.push({ key: "generate", kind: "generate" });
   const ranked = rankItems(items, input.origin);
   if (input.field === "otp") rows.push(...codeRows(input, ranked));
-  else rows.push(...ranked.map((r) => loginRow(r.item, r.tier < TIER.subdomain)));
+  else rows.push(...labelTwins(ranked.map((r) => loginRow(r.item, r.tier < TIER.subdomain))));
   const locked = input.providers.filter((p) => p.state === "locked").sort((a, b) => (providerOrder.get(a.id) ?? 0) - (providerOrder.get(b.id) ?? 0));
   rows.push(...locked.map((p): VaultRow => ({ key: `unlock:${p.id}`, kind: "unlock", provider: p.id, name: p.name })));
   const footer = input.field === "password" && unlocked.size ? [OTHER_PASSWORDS, SUGGEST] : [OTHER_PASSWORDS];

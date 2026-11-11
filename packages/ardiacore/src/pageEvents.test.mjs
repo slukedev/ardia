@@ -17,6 +17,7 @@ const chromiumEmitters = files(/\.mm$/).map(native);
 const webKitTab = files(/^WebKitTab.*\.swift$/).map(native);
 const pageScript = native("page_script.js");
 const messageReceivers = ["ArdiaWebView+PageMessages.mm", "ArdiaWebView+Peek.mm"].map(native);
+const hiddenPageDriver = native("GoogleWebImporter.swift");
 
 test("the Chromium view emits every page event in PAGE_EVENTS, and nothing else", () => {
   assert.deepEqual(sorted(collect(chromiumEmitters, /\bemit:@"([A-Za-z]+)"\s+payload:/g)), sorted(PAGE_EVENTS));
@@ -30,12 +31,12 @@ test("the WebKit tab emits only page events in PAGE_EVENTS", () => {
 
 test("every kind the page script sends has a native receiver, and every receiver has a sender", () => {
   const sent = collect([pageScript], /\bsend\("([A-Za-z]+)"/g);
-  const received = collect(messageReceivers, /kind isEqualToString:@"([A-Za-z]+)"/g);
+  const received = new Set([...collect(messageReceivers, /kind isEqualToString:@"([A-Za-z]+)"/g), ...collect([hiddenPageDriver], /kind == "([A-Za-z]+)"/g)]);
   assert.deepEqual(sorted(received), sorted(sent));
 });
 
 test("every kind native sends into a frame has a page-script handler, and every handler has a sender", () => {
-  const called = collect(chromiumView, /kind:@"([A-Za-z]+)"/g);
+  const called = new Set([...collect(chromiumView, /kind:@"([A-Za-z]+)"/g), ...collect([hiddenPageDriver], /\.send\("([A-Za-z]+)", json:/g)]);
   const handled = collect([pageScript], /\bhandlers\.([A-Za-z]+) =/g);
   assert.deepEqual(sorted(handled), sorted(called));
 });

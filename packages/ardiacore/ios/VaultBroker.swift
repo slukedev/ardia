@@ -1,20 +1,31 @@
 import Foundation
 
+enum VaultRefreshReason {
+  @TaskLocal static var current: GoogleWebTrigger = .use
+}
+
 actor VaultBroker {
   static let shared = VaultBroker()
-  static let itemsLifetime: TimeInterval = 60
+  static let syncingDelay: UInt64 = 150_000_000
 
-  private let sessions = VaultSessionStore.shared
+  let sessions = VaultSessionStore.shared
   private var lanes: [String: VaultLane] = [:]
-  private var states: [String: VaultProviderState] = [:]
-  private var cachedItems: [String: [VaultItem]] = [:]
-  private var fetchedAt: [String: Date] = [:]
-  private var loading: [String: Task<[VaultItem], Error>] = [:]
+  var states: [String: VaultProviderState] = [:]
+  var cachedItems: [String: [VaultItem]] = [:]
+  var listedItems: [String: [VaultItem]] = [:]
+  var pendingSaves: [String: [VaultPendingSave]] = [:]
+  var syncWork: [String: Set<UUID>] = [:]
+  var syncShown: Set<String> = []
+  private var epochs: [String: Int] = [:]
+  var quiet = false
+  var fetchedAt: [String: Date] = [:]
+  var loading: [String: Task<[VaultItem], Error>] = [:]
   private var versions: [String: String] = [:]
   private var refreshing: Task<Void, Never>?
   private var ownerNeededForPasswords = true
-  private var loadPasswordsWhenUsed = false
-  private var cachedPasswords: [String: [String: VaultCacheSnapshot.Password]] = [:]
+  var loadPasswordsWhenUsed = false
+  var syncSchedule = VaultSyncSchedule.automatic
+  var cachedPasswords: [String: [String: VaultCacheSnapshot.Password]] = [:]
 
   func providerStates() -> [VaultProviderState] {
     if refreshing == nil {
@@ -27,6 +38,13 @@ actor VaultBroker {
     guard let provider = VaultRegistry.provider(id) else { return nil }
     if explicit {
       sessions.clearScratch(id)
+      if id == GooglePasswordManagerVault.providerId, GooglePasswordManagerVault.usesWeb {
+        await GoogleWebImporter.shared.personConfirmed()
+        if sessions.session(id) != nil {
+          await VaultRefreshReason.$current.withValue(.person) { _ = await fetchItems(provider) }
+        }
+        return await currentState(provider)
+      }
       dropItems(id, announce: false)
     }
     return await currentState(provider)
@@ -54,7 +72,7 @@ actor VaultBroker {
       await lane(id).run { await provider.lock(cli) }
     }
     sessions.forget(id, keepStored: sessions.touchID)
-    dropItems(id, announce: true)
+    dropItems(id, announce: true, forgetPending: true)
     return await currentState(provider)
   }
 
@@ -66,6 +84,22 @@ actor VaultBroker {
     for id in sessions.idleProviders() { _ = await lock(id) }
   }
 
+  func syncDue() async {
+    guard !quiet else { return }
+    let now = Date()
+    let due = VaultRegistry.providers.filter { provider in
+      syncSchedule.refreshes(
+        .timer, fetchedAt: fetchedAt[provider.id], now: now,
+        unlocked: sessions.session(provider.id) != nil && states[provider.id]?.state == .unlocked,
+        inFlight: loading[provider.id] != nil)
+    }
+    await withTaskGroup(of: Void.self) { group in
+      for provider in due {
+        group.addTask { await VaultRefreshReason.$current.withValue(.schedule) { _ = await self.fetchItems(provider, byPerson: false) } }
+      }
+    }
+  }
+
   func signOut(_ id: String) async -> VaultProviderState? {
     guard let provider = VaultRegistry.provider(id) else { return nil }
     sessions.cancelRunning(id)
@@ -73,7 +107,7 @@ actor VaultBroker {
       await lane(id).run { await provider.signOut(cli) }
     }
     sessions.signedOut(id)
-    dropItems(id, announce: true)
+    dropItems(id, announce: true, forgetPending: true)
     VaultCache.delete(id)
     return await currentState(provider)
   }
@@ -82,6 +116,7 @@ actor VaultBroker {
     guard let provider = VaultRegistry.provider(id) else { return nil }
     guard let cli = VaultCLI.make(for: provider, sessions: sessions) else { return await currentState(provider) }
     let problem = await lane(id).run { await provider.configure(cli, server: server) }
+    if problem == nil { dropItems(id, announce: true, forgetPending: true) }
     var state = await currentState(provider)
     if let problem { state.message = problem }
     return state
@@ -128,7 +163,8 @@ actor VaultBroker {
     return await VaultOwnerCheck.confirm(reason)
   }
 
-  func setOptions(idleLockMinutes: Int, touchID: Bool, askBeforeFilling: Bool, loadPasswordsWhenUsed whenUsed: Bool) {
+  func setOptions(idleLockMinutes: Int, touchID: Bool, askBeforeFilling: Bool, loadPasswordsWhenUsed whenUsed: Bool, syncIntervalSeconds: Double?) {
+    syncSchedule = VaultSyncSchedule(seconds: syncIntervalSeconds)
     ownerNeededForPasswords = askBeforeFilling
     loadPasswordsWhenUsed = whenUsed
     if whenUsed {
@@ -190,9 +226,9 @@ actor VaultBroker {
     do {
       let item = try await lane(provider.id).run { try await provider.save(cli, login: login) }
       sessions.touch(provider.id)
-      dropItems(provider.id, announce: false)
-      announceItems(provider.id)
-      return .success(item)
+      let shown = insertPending(provider.id, item: item, password: password)
+      Task { _ = await self.fetchItems(provider, byPerson: false) }
+      return .success(shown)
     } catch {
       await fail(provider, error)
       return .failure(Self.fillError(error))
@@ -209,7 +245,7 @@ actor VaultBroker {
   }
 
   private func placeholder(_ provider: any VaultProvider) -> VaultProviderState {
-    VaultBinaryLocator.locate(provider.binaryName) == nil ? provider.makeState(.notInstalled) : provider.makeState(.locked)
+    provider.locate() == nil ? provider.makeState(.notInstalled) : provider.makeState(.locked)
   }
 
   private func lane(_ id: String) -> VaultLane {
@@ -222,7 +258,8 @@ actor VaultBroker {
   private func currentState(_ provider: any VaultProvider) async -> VaultProviderState {
     guard let cli = VaultCLI.make(for: provider, sessions: sessions) else {
       if sessions.session(provider.id) != nil { sessions.forget(provider.id, keepStored: true) }
-      dropItems(provider.id, announce: true)
+      dropItems(provider.id, announce: true, forgetPending: true)
+      stopSync(provider.id)
       return publish(provider.makeState(.notInstalled))
     }
     let installedVersion = await version(of: cli)
@@ -230,7 +267,10 @@ actor VaultBroker {
     state.cliPath = cli.path
     state.cliVersion = installedVersion
     reconcile(provider.id, with: state.state)
-    if state.state != .unlocked && state.state != .unavailable { dropItems(provider.id, announce: true) }
+    if state.state != .unlocked && state.state != .unavailable {
+      dropItems(provider.id, announce: true, forgetPending: true)
+      stopSync(provider.id)
+    }
     return publish(state)
   }
 
@@ -244,7 +284,8 @@ actor VaultBroker {
   }
 
   private func version(of cli: VaultCLI) async -> String? {
-    let key = (cli.path as NSString).resolvingSymlinksInPath
+    guard let path = cli.path else { return nil }
+    let key = (path as NSString).resolvingSymlinksInPath
     if let known = versions[key] { return known }
     guard let found = await cli.version() else { return nil }
     versions[key] = found
@@ -253,47 +294,60 @@ actor VaultBroker {
 
   private func missingTool(_ provider: any VaultProvider) async -> VaultSignInResult {
     let state = await currentState(provider)
-    return VaultSignInResult(ok: false, state: state, error: "\(provider.name)'s command-line tool isn't installed.")
+    return VaultSignInResult(ok: false, state: state, error: provider.notInstalledMessage)
   }
 
   private func settle(_ provider: any VaultProvider, _ outcome: VaultSignInResult) async -> VaultSignInResult {
     var result = outcome
     if result.ok {
       sessions.touch(provider.id)
-      dropItems(provider.id, announce: false)
+      dropItems(provider.id, announce: false, forgetPending: true)
+      if provider.id == GooglePasswordManagerVault.providerId, GooglePasswordManagerVault.usesWeb {
+        restoreFromDisk(provider.id)
+        Task { await VaultRefreshReason.$current.withValue(.unlock) { _ = await self.fetchItems(provider, byPerson: false) } }
+      }
     }
     result.state = await currentState(provider)
     result.ok = result.ok && result.state.state == .unlocked
     return result
   }
 
-  private func cacheAccount(_ id: String) -> String {
+  func cacheAccount(_ id: String) -> String {
     let state = states[id]
     return "\(state?.account ?? "")@\(state?.server ?? "")"
   }
 
-  private func persist(_ id: String) {
-    guard let items = cachedItems[id] else { return }
+  func persist(_ id: String) {
+    guard let items = listedItems[id] else { return }
+    let pending = (pendingSaves[id] ?? []).map { save in
+      var kept = save
+      if loadPasswordsWhenUsed { kept.password = nil }
+      return kept
+    }
     let snapshot = VaultCacheSnapshot(
       account: cacheAccount(id), savedAt: (fetchedAt[id] ?? Date()).timeIntervalSince1970,
       entries: items.map { VaultCacheSnapshot.Entry(item: $0, totpPeriod: $0.totpPeriod) },
-      passwords: loadPasswordsWhenUsed ? [:] : cachedPasswords[id] ?? [:])
+      passwords: loadPasswordsWhenUsed ? [:] : cachedPasswords[id] ?? [:], pending: pending.isEmpty ? nil : pending)
     VaultCache.save(id, snapshot)
   }
 
-  private func restoreFromDisk(_ id: String) {
-    guard cachedItems[id] == nil, let snapshot = VaultCache.load(id, account: cacheAccount(id)) else { return }
-    cachedItems[id] = snapshot.items
+  func restoreFromDisk(_ id: String) {
+    guard listedItems[id] == nil, let snapshot = VaultCache.load(id, account: cacheAccount(id)) else { return }
+    listedItems[id] = snapshot.items.filter { $0.pending != true }
     cachedPasswords[id] = loadPasswordsWhenUsed ? [:] : snapshot.passwords
     fetchedAt[id] = Date(timeIntervalSince1970: snapshot.savedAt)
+    var pending = snapshot.pending ?? []
+    for save in pendingSaves[id] ?? [] { pending = VaultPendingItems.adding(save, to: pending) }
+    pendingSaves[id] = pending.isEmpty ? nil : pending
+    remerge(id)
   }
 
   private func items(of provider: any VaultProvider) async -> [VaultItem] {
     let id = provider.id
     guard sessions.session(id) != nil else { return [] }
     restoreFromDisk(id)
-    if let cached = cachedItems[id] {
-      if Date().timeIntervalSince(fetchedAt[id] ?? .distantPast) >= Self.itemsLifetime, loading[id] == nil {
+    if listedItems[id] != nil, let cached = cachedItems[id] {
+      if syncSchedule.refreshes(.use, fetchedAt: fetchedAt[id], now: Date(), unlocked: true, inFlight: loading[id] != nil) {
         Task { _ = await self.fetchItems(provider) }
       }
       return cached
@@ -301,28 +355,40 @@ actor VaultBroker {
     return await fetchItems(provider)
   }
 
-  private func fetchItems(_ provider: any VaultProvider) async -> [VaultItem] {
+  func fetchItems(_ provider: any VaultProvider, byPerson: Bool = true) async -> [VaultItem] {
     let id = provider.id
-    if let pending = loading[id] { return (try? await pending.value) ?? [] }
+    if let inFlight = loading[id] {
+      _ = try? await inFlight.value
+      return cachedItems[id] ?? []
+    }
     guard let cli = VaultCLI.make(for: provider, sessions: sessions) else { return [] }
     let queue = lane(id)
+    let epoch = epochs[id, default: 0]
     let listing = Task { try await queue.run { try await provider.itemsAndPasswords(cli) } }
     let task = Task { try await listing.value.items }
     loading[id] = task
-    defer { loading[id] = nil }
+    let token = beginSync(id)
+    defer {
+      loading[id] = nil
+      endSync(id, token)
+    }
     do {
       let fresh = try await listing.value
-      guard sessions.session(id) != nil else { return [] }
+      guard sessions.session(id) != nil, epochs[id, default: 0] == epoch else { return [] }
       let previous = cachedItems[id]
-      cachedItems[id] = fresh.items
+      listedItems[id] = fresh.items
       fetchedAt[id] = Date()
       mergePasswords(id, fresh)
+      remerge(id, passwords: fresh.passwords)
       persist(id)
-      sessions.touch(id)
-      if previous != fresh.items { announceItems(id) }
-      return fresh.items
+      if byPerson { sessions.touch(id) }
+      let merged = cachedItems[id] ?? []
+      if previous != merged { announceItems(id) }
+      if id == GooglePasswordManagerVault.providerId { _ = await currentState(provider) }
+      return merged
     } catch {
       await fail(provider, error)
+      if id == GooglePasswordManagerVault.providerId { _ = await currentState(provider) }
       return cachedItems[id] ?? []
     }
   }
@@ -350,14 +416,21 @@ actor VaultBroker {
     let id = provider.id
     guard sessions.session(id) != nil, let cli = VaultCLI.make(for: provider, sessions: sessions) else { return .failure(.locked) }
     let listed = cachedItems[id]?.first { $0.id == item }
+    if field == .password, let password = pendingPassword(id, item: item) {
+      sessions.touch(id)
+      return .success(password)
+    }
     if field == .password, !loadPasswordsWhenUsed, let listed, let hit = cachedPasswords[id]?[item], hit.itemUpdatedAt == listed.updatedAt {
       sessions.touch(id)
       return .success(hit.value)
     }
+    let reachesGoogle = id == GooglePasswordManagerVault.providerId && GooglePasswordManagerVault.usesWeb
+    let token = reachesGoogle ? beginSync(id) : nil
+    defer { if let token { endSync(id, token) } }
     do {
       let value = try await lane(id).run { try await provider.secret(cli, id: item, field: field) }
       sessions.touch(id)
-      if field == .password, !loadPasswordsWhenUsed, let listed {
+      if field == .password, !loadPasswordsWhenUsed, let listed, listed.pending != true {
         cachedPasswords[id, default: [:]][item] = VaultCacheSnapshot.Password(value: value, itemUpdatedAt: listed.updatedAt)
         persist(id)
       }
@@ -373,11 +446,11 @@ actor VaultBroker {
     switch error {
     case .locked:
       sessions.forget(provider.id, keepStored: sessions.touchID)
-      dropItems(provider.id, announce: true)
+      dropItems(provider.id, announce: true, forgetPending: true)
       _ = await currentState(provider)
     case .signedOut:
       sessions.signedOut(provider.id)
-      dropItems(provider.id, announce: true)
+      dropItems(provider.id, announce: true, forgetPending: true)
       VaultCache.delete(provider.id)
       _ = await currentState(provider)
     default:
@@ -385,16 +458,24 @@ actor VaultBroker {
     }
   }
 
-  private func dropItems(_ id: String, announce: Bool) {
+  private func dropItems(_ id: String, announce: Bool, forgetPending: Bool = false) {
     cachedPasswords[id] = nil
+    listedItems[id] = nil
     let had = !(cachedItems.removeValue(forKey: id) ?? []).isEmpty
     fetchedAt[id] = nil
+    if forgetPending {
+      pendingSaves[id] = nil
+      epochs[id, default: 0] += 1
+    } else {
+      remerge(id)
+    }
     if announce && had { announceItems(id) }
   }
 
-  private func publish(_ fresh: VaultProviderState) -> VaultProviderState {
+  func publish(_ fresh: VaultProviderState) -> VaultProviderState {
     var state = fresh
     state.touchUnlock = state.state == .locked && sessions.hasStoredSession(state.id)
+    state.syncing = state.state == .unlocked && syncShown.contains(state.id)
     guard states[state.id] != state else { return state }
     states[state.id] = state
     let payload: [String: Any] = ["provider": state.jsonObject()]
@@ -402,7 +483,19 @@ actor VaultBroker {
     return state
   }
 
-  private func announceItems(_ id: String) {
+  func googleListChanged() async {
+    let id = GooglePasswordManagerVault.providerId
+    guard let provider = VaultRegistry.provider(id), sessions.session(id) != nil else { return }
+    _ = await fetchItems(provider, byPerson: false)
+    _ = await currentState(provider)
+  }
+
+  func storeChanged(_ id: String) async {
+    guard let provider = VaultRegistry.provider(id), sessions.session(id) != nil else { return }
+    _ = await fetchItems(provider, byPerson: false)
+  }
+
+  func announceItems(_ id: String) {
     DispatchQueue.main.async { ArdiaEvents.emit("vaults.itemsChanged", data: ["provider": id]) }
   }
 

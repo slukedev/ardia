@@ -11,13 +11,29 @@ struct VaultCLI: Sendable {
   ]
 
   let provider: String
-  let path: String
+  let location: VaultLocation
   let environment: [String: String]
   let sessions: VaultSessionStore
 
+  var path: String? {
+    guard case .binary(let path) = location else { return nil }
+    return path
+  }
+
+  var dataFolder: String? {
+    guard case .dataFolder(let folder) = location else { return nil }
+    return folder
+  }
+
   static func make(for provider: any VaultProvider, sessions: VaultSessionStore) -> VaultCLI? {
-    guard let path = VaultBinaryLocator.locate(provider.binaryName) else { return nil }
-    return VaultCLI(provider: provider.id, path: path, environment: environment(for: provider, path: path), sessions: sessions)
+    switch provider.locate() {
+    case .binary(let path)?:
+      return VaultCLI(provider: provider.id, location: .binary(path), environment: environment(for: provider, path: path), sessions: sessions)
+    case .dataFolder(let folder)?:
+      return VaultCLI(provider: provider.id, location: .dataFolder(folder), environment: [:], sessions: sessions)
+    case nil:
+      return nil
+    }
   }
 
   private static func environment(for provider: any VaultProvider, path: String) -> [String: String] {
@@ -56,12 +72,15 @@ struct VaultCLI: Sendable {
 
   func run(_ arguments: [String], input: Data? = nil, environment extra: [String: String] = [:],
            timeout: TimeInterval = VaultCLI.defaultTimeout) async -> VaultCommandResult {
-    await makeCommand(arguments, input: input, environment: extra, timeout: timeout, onOutput: nil).run()
+    guard let command = makeCommand(arguments, input: input, environment: extra, timeout: timeout, onOutput: nil) else { return .notLaunched }
+    return await command.run()
   }
 
   func start(_ arguments: [String], environment extra: [String: String] = [:], timeout: TimeInterval,
              onOutput: @escaping @Sendable (String) -> Void, completion: @escaping @Sendable (VaultCommandResult) -> Void) {
-    let command = makeCommand(arguments, input: nil, environment: extra, timeout: timeout, onOutput: onOutput)
+    guard let command = makeCommand(arguments, input: nil, environment: extra, timeout: timeout, onOutput: onOutput) else {
+      return completion(.notLaunched)
+    }
     let sessions = self.sessions
     let provider = self.provider
     sessions.setRunning(provider, command)?.cancel()
@@ -72,8 +91,9 @@ struct VaultCLI: Sendable {
   }
 
   private func makeCommand(_ arguments: [String], input: Data?, environment extra: [String: String], timeout: TimeInterval,
-                           onOutput: (@Sendable (String) -> Void)?) -> VaultCommand {
-    VaultCommand(executable: path, arguments: arguments, environment: environment.merging(extra) { _, chosen in chosen },
+                           onOutput: (@Sendable (String) -> Void)?) -> VaultCommand? {
+    guard let path else { return nil }
+    return VaultCommand(executable: path, arguments: arguments, environment: environment.merging(extra) { _, chosen in chosen },
                  input: input, timeout: timeout, onOutput: onOutput)
   }
 

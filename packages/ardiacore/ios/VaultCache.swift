@@ -17,6 +17,7 @@ struct VaultCacheSnapshot: Codable, Sendable {
   var savedAt: Double
   var entries: [Entry]
   var passwords: [String: Password]
+  var pending: [VaultPendingSave]? = nil
 
   var items: [VaultItem] {
     entries.map { entry in
@@ -31,7 +32,7 @@ enum VaultCache {
   private static let keyAccount = "vault-cache-key"
   private static let lock = NSLock()
 
-  private static var directory: URL? {
+  static var directory: URL? {
     let base: URL
     if let sandbox = VaultSandbox.directory {
       base = URL(fileURLWithPath: sandbox, isDirectory: true)
@@ -102,8 +103,14 @@ enum VaultCache {
       var snapshot = try? JSONDecoder().decode(VaultCacheSnapshot.self, from: plain)
     else { return lock.unlock() }
     lock.unlock()
-    guard !snapshot.passwords.isEmpty else { return }
+    let pendingPasswords = snapshot.pending?.contains { $0.password != nil } == true
+    guard !snapshot.passwords.isEmpty || pendingPasswords else { return }
     snapshot.passwords = [:]
+    snapshot.pending = snapshot.pending?.map { save in
+      var kept = save
+      kept.password = nil
+      return kept
+    }
     save(provider, snapshot)
   }
 

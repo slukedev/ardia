@@ -13,6 +13,16 @@ import {
   unlockProvider,
   type VaultProviderState,
 } from "../../../state/vaults/actions";
+import {
+  checkGoogleSignInState,
+  GOOGLE_SIGN_IN_TEXT,
+  isChromeVault,
+  saveGoogleAccountPassword,
+  showGoogleSignIn,
+  useGoogleAccount,
+  watchGoogleSignIn,
+  type GoogleSignInState,
+} from "../../../state/vaults/google";
 import { useVaultProvider } from "../../../state/vaults/hooks";
 import { useSettings } from "../../../state/browser/hooks";
 import { updateSettings } from "../../../state/settings/actions";
@@ -26,6 +36,7 @@ import { SheetError, SheetHead, SheetText, TouchIdRow, Waiting } from "../../vau
 
 export const showConnectSheet = (provider: string) => showSettingsSheet(<ConnectSheet provider={provider} />);
 export const showUnlockSheet = (provider: string) => showSettingsSheet(<UnlockSheet provider={provider} />);
+export const showGoogleSaveSheet = (provider: string) => showSettingsSheet(<GoogleSaveSheet provider={provider} />);
 
 function useCloseWhenUnlocked(provider: VaultProviderState | undefined) {
   const was = useRef(provider?.state);
@@ -39,6 +50,7 @@ function ConnectSheet({ provider: id }: { provider: string }) {
   const provider = useVaultProvider(id);
   useCloseWhenUnlocked(provider);
   if (!provider) return null;
+  if (isChromeVault(provider)) return <GoogleSaveSheet provider={provider.id} />;
   if (provider.state === "notInstalled") return <InstallSheet provider={provider} />;
   switch (provider.setup?.kind) {
     case "desktopIntegration":
@@ -184,6 +196,78 @@ function ProtonPassSheet({ provider }: { provider: VaultProviderState }) {
         ) : (
           <Button title="Continue in Browser" kind="primary" disabled={busy} onPress={() => void begin()} />
         )}
+      </DialogActions>
+    </Sheet>
+  );
+}
+
+function GoogleSaveSheet({ provider: id }: { provider: string }) {
+  const provider = useVaultProvider(id);
+  const account = useGoogleAccount();
+  const [email, setEmail] = useState(account.email ?? provider?.account ?? "");
+  useEffect(() => {
+    if (account.email) setEmail((typed) => typed || account.email!);
+  }, [account.email]);
+  const [password, setPassword] = useState("");
+  const [signIn, setSignIn] = useState<GoogleSignInState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    const check = () => {
+      setSignIn(null);
+      void checkGoogleSignInState().then((state) => live && setSignIn(state));
+    };
+    check();
+    const subscription = watchGoogleSignIn(check);
+    return () => {
+      live = false;
+      subscription.remove();
+    };
+  }, []);
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    const problem = await saveGoogleAccountPassword(email, password);
+    setPassword("");
+    if (problem) {
+      setBusy(false);
+      return setError(problem);
+    }
+    const state = await refreshProvider(id);
+    if (state?.state === "locked") {
+      const result = await unlockProvider(id, null);
+      if (!result.ok) {
+        setBusy(false);
+        return setError(signInError(result, provider?.name ?? "Google Password Manager"));
+      }
+    }
+    setBusy(false);
+    closeSettingsSheet();
+  };
+  const connecting = !account.hasPassword;
+  return (
+    <Sheet onClose={closeSettingsSheet}>
+      <SheetHead provider={id} title={connecting ? "Connect Google Password Manager" : "Google Password"} />
+      <SheetText>Ardia syncs with passwords.google.com in the background. Google asks for your password each time, so Ardia keeps it in your keychain behind Touch ID.</SheetText>
+      <View style={GAP_TOP}>
+        <Group>
+          <Row title="Google in Ardia" description={signIn ? GOOGLE_SIGN_IN_TEXT[signIn] : "Checking…"}>
+            {signIn === "signIn" ? <Button title="Sign In…" onPress={showGoogleSignIn} /> : null}
+          </Row>
+        </Group>
+      </View>
+      <FormField label="Google Account">
+        <TextField value={email} onChangeText={setEmail} placeholder="name@gmail.com" width="100%" />
+      </FormField>
+      <FormField label="Google Password">
+        <TextField value={password} onChangeText={setPassword} secure autoFocus width="100%" onSubmit={() => void save()} />
+      </FormField>
+      <SheetError text={error} />
+      <DialogActions>
+        <Button title="Cancel" onPress={closeSettingsSheet} />
+        <Button title={busy ? (connecting ? "Connecting…" : "Saving…") : connecting ? "Connect" : "Update Password"} kind="primary" disabled={busy || !password || !email.trim() || signIn === "signIn"} onPress={() => void save()} />
       </DialogActions>
     </Sheet>
   );

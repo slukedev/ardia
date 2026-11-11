@@ -103,6 +103,12 @@ export function startDevHarness() {
     get settingsNav(): typeof import("../../state/settings/settingsWindows").useSettingsNav {
       return require("../../state/settings/settingsWindows").useSettingsNav;
     },
+    get vaultFixtures(): typeof import("../../state/vaults/vaultFixtures") & typeof import("../../state/vaults/menu") & typeof import("../../state/vaults/store") {
+      return { ...require("../../state/vaults/vaultFixtures"), ...require("../../state/vaults/menu"), ...require("../../state/vaults/store") };
+    },
+    get vaultSync(): typeof import("../../state/vaults/sync") {
+      return require("../../state/vaults/sync");
+    },
     get savedPasswords(): typeof import("../../state/site/savedPasswords") {
       return require("../../state/site/savedPasswords");
     },

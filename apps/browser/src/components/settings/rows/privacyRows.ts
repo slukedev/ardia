@@ -55,7 +55,7 @@ export const privacyRows = {
           description: "Offers to save a login after you sign in, and suggests saved ones when you click a login field.",
           keywords: ["password manager", "logins", "credentials", "keychain"],
         },
-        importPasswords: { title: "Import passwords", description: "From a CSV exported by Chrome, Safari, Firefox, 1Password, Bitwarden…", keywords: ["csv", "logins"] },
+        importPasswords: { title: "Import passwords", description: "From a CSV exported by Google Password Manager, Safari, Firefox, 1Password, Bitwarden…", keywords: ["csv", "logins", "chrome", "google", "passwords.google.com"] },
         exportPasswords: { advanced: true, title: "Export passwords", description: "To a CSV file. Anyone who can open the file can read your passwords.", keywords: ["csv", "backup", "logins"] },
       },
     },
@@ -64,11 +64,12 @@ export const privacyRows = {
       rows: {
         managers: {
           title: "Password Managers",
-          keywords: ["1password", "bitwarden", "proton pass", "vaultwarden", "self-hosted", "vault", "connect", "one-time codes", "totp", "2fa"],
+          keywords: ["1password", "bitwarden", "proton pass", "google password manager", "google chrome", "chrome profile", "vaultwarden", "self-hosted", "vault", "connect", "one-time codes", "totp", "2fa"],
         },
         vaultSuggestOnFocus: { title: "Suggest on Focus", keywords: ["autofill", "fill menu", "suggestions", "login field"] },
         vaultAskBeforeFilling: { title: "Ask Before Filling", keywords: ["touch id", "fingerprint", "password", "screen lock", "authenticate", "biometrics"] },
         vaultLoadPasswordsWhenUsed: { title: "Load Passwords When Used", keywords: ["cache", "offline", "local copy", "faster", "encrypted", "fetch"] },
+        vaultSyncInterval: { title: "Sync Passwords", keywords: ["sync now", "refresh", "update", "interval", "every hour", "manually", "background"] },
         vaultMenuGlass: { title: "Glass Menu", keywords: ["fill menu", "liquid glass", "translucent", "apple passwords", "look"] },
         vaultSaveOffer: { title: "Offer to Save", keywords: ["save login", "new password", "save prompt"] },
         vaultSaveTarget: { title: "Save New Logins To", keywords: ["default manager", "save to", "destination"] },

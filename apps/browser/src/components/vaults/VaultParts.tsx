@@ -2,18 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, View } from "react-native";
 import { brandAccent, brandOf } from "../../state/vaults/brands";
 import { NEUTRAL_BRAND_ACCENT } from "../../state/vaults/tokens";
-import { capsule, curve, ink, radius, reduceMotion, Symbol, useTheme, withAlpha } from "../ui";
+import { capsule, curve, ink, reduceMotion, Symbol, SyncGlyph, Text, useTheme, type SyncGlyphSize } from "../ui";
+import type { VaultSyncStatus as SyncStatus } from "../../state/vaults/sync";
 import { VAULT_CODE, VAULT_MENU } from "./tokens";
 
-export function BrandBadge({ provider, box = VAULT_MENU.badge.box, glyph = VAULT_MENU.badge.glyph, solid = false, tooltip }: { provider: string; box?: number; glyph?: number; solid?: boolean; tooltip?: string }) {
+export function BrandBadge({ provider, box = VAULT_MENU.badge.box, glyph = VAULT_MENU.badge.glyph, tooltip }: { provider: string; box?: number; glyph?: number; tooltip?: string }) {
   const theme = useTheme();
-  const accent = brandAccent(provider);
   return (
-    <View
-      tooltip={tooltip}
-      style={{ width: box, height: box, borderRadius: box > VAULT_MENU.unlockBadge.box ? radius.tile : radius.control, backgroundColor: solid ? accent : withAlpha(accent, VAULT_MENU.badgeAlpha), alignItems: "center", justifyContent: "center" }}
-    >
-      <Symbol name={brandOf(provider).symbol} size={glyph} weight="semibold" color={solid ? theme.onAccent : accent} style={{ width: box, height: box }} />
+    <View tooltip={tooltip} style={{ width: box, height: box, borderRadius: box * VAULT_MENU.icon.corner, backgroundColor: brandAccent(provider), alignItems: "center", justifyContent: "center" }}>
+      <Symbol name={brandOf(provider).symbol} size={glyph} weight="semibold" color={theme.onAccent} style={{ width: box, height: box }} />
     </View>
   );
 }
@@ -26,6 +23,19 @@ export function VaultAppIcon({ provider, symbol, neutral }: { provider: string; 
     <View style={{ width: box, height: box, borderRadius: corner, backgroundColor: fill, alignItems: "center", justifyContent: "center" }}>
       <Symbol name={symbol ?? brandOf(provider).symbol} size={glyph} weight="semibold" color={theme.onAccent} style={{ width: box, height: box }} />
     </View>
+  );
+}
+
+export function VaultSyncStatus({ status, size = "body", tooltip }: { status: SyncStatus | null; size?: SyncGlyphSize; tooltip?: string }) {
+  return (
+    <>
+      <SyncGlyph active={status === "syncing"} size={size} tooltip={tooltip} />
+      {status === "synced" ? (
+        <Text size={size} tone="textSecondary">
+          Synced
+        </Text>
+      ) : null}
+    </>
   );
 }
 

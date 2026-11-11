@@ -91,7 +91,7 @@ function ShownAnchor({ id, children, radius, style }: { id?: SettingId; children
   );
 }
 
-export function SectionHeader({ title, description, action, anchor }: { title?: string; description?: string | null; action?: ReactNode; anchor?: SettingId }) {
+export function SectionHeader({ title, description, action, accessory, anchor }: { title?: string; description?: string | null; action?: ReactNode; accessory?: ReactNode; anchor?: SettingId }) {
   const pane = useContext(SettingsPaneContext);
   const entry = anchor ? setting(anchor) : undefined;
   const text = title ?? entry?.section ?? "";
@@ -100,7 +100,14 @@ export function SectionHeader({ title, description, action, anchor }: { title?: 
   return (
     <Anchor id={anchor} keep shape="row" style={SECTION_HEADER}>
       <View style={{ flex: 1 }}>
-        <Text weight="semibold">{text}</Text>
+        {accessory ? (
+          <View style={SECTION_TITLE_ROW}>
+            <Text weight="semibold">{text}</Text>
+            {accessory}
+          </View>
+        ) : (
+          <Text weight="semibold">{text}</Text>
+        )}
         {detail ? (
           <Text size="small" tone="textSecondary" style={SECTION_DETAIL}>
             {detail}
@@ -158,6 +165,7 @@ export function ProfilePicker({ value, onChange }: { value: string; onChange: (p
 
 const SECTION_HEADER = { flexDirection: "row", alignItems: "flex-end", marginTop: space.xxxl, marginBottom: space.m, paddingHorizontal: space.xxs } as const;
 const SECTION_DETAIL = { marginTop: space.xs, lineHeight: lineHeight.body } as const;
+const SECTION_TITLE_ROW = { flexDirection: "row", alignItems: "center", gap: space.s } as const;
 
 export function PaneIntro({ children }: { children: ReactNode }) {
   return (

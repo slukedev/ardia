@@ -20,7 +20,7 @@ export const duration = {
   long: 400,
 } as const;
 
-export const period = { spinner: 900, pulse: 1100 } as const;
+export const period = { spinner: 900, pulse: 1100, sync: 1300 } as const;
 
 export type Fade = { duration: number; easing: EasingFunction; delay?: number };
 

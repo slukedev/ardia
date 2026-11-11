@@ -15,7 +15,7 @@ import {
 import { openExternalURL } from "../../platform/app";
 import { copyText } from "../../platform/clipboard";
 import { openSettings, openUrlFromSettings } from "../settings/settingsWindows";
-import { applyProviderState, clearVaultIndex, currentVaultProviders, loadVaultProviders, vaultProviderOf } from "./store";
+import { applyProviderState, clearVaultIndex, currentVaultProviders, loadVaultProviders, setVaultUnlocking, vaultProviderOf } from "./store";
 import { brandOf } from "./brands";
 
 export type { VaultProviderState, VaultSignInFields, VaultSignInResult };
@@ -47,7 +47,10 @@ async function withState(run: () => Promise<VaultProviderState>): Promise<VaultP
   }
 }
 
-export const unlockProvider = (provider: string, password: string | null = null) => withResult(provider, () => unlockVault(provider, password));
+export function unlockProvider(provider: string, password: string | null = null) {
+  setVaultUnlocking(provider, true);
+  return withResult(provider, () => unlockVault(provider, password)).finally(() => setVaultUnlocking(provider, false));
+}
 export const signInProvider = (provider: string, fields: VaultSignInFields) => withResult(provider, () => signInVault(provider, fields));
 export const lockProvider = (provider: string) => withState(() => lockVault(provider));
 export const signOutProvider = (provider: string) => withState(() => signOutVault(provider));

@@ -41,6 +41,19 @@ extension ArdiaWebView: PageTab {
       return completion(["saved": false, "error": VaultFillError.notFound.rawValue])
     }
     let username = login["username"] ?? ""
+    if provider == GooglePasswordManagerVault.providerId {
+      Task { @MainActor in
+        let reply = await VaultBroker.shared.saveToGoogle(origin: origin, username: username, password: password, title: title)
+        if reply["saved"] as? Bool != true { self.keepVaultLogin(username: username, password: password, origin: origin) }
+        completion(reply)
+        guard reply["saved"] as? Bool == true, let importId = reply["importId"] as? String else { return }
+        Task { @MainActor [weak self] in
+          guard case .failed = await GoogleWebImporter.shared.finalReply(importId) else { return }
+          self?.keepVaultLogin(username: username, password: password, origin: origin)
+        }
+      }
+      return
+    }
     Task { @MainActor in
       let result = await VaultBroker.shared.save(provider: provider, origin: origin, username: username, password: password, title: title)
       switch result {

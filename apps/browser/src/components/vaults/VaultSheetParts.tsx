@@ -7,7 +7,7 @@ import { BrandBadge } from "./VaultParts";
 import { VAULT_SETTINGS } from "./tokens";
 
 export function SheetHead({ provider, title }: { provider: string; title: string }) {
-  return <DialogTitle icon={<BrandBadge provider={provider} box={VAULT_SETTINGS.sheetTile} glyph={VAULT_SETTINGS.sheetGlyph} solid />}>{title}</DialogTitle>;
+  return <DialogTitle icon={<BrandBadge provider={provider} box={VAULT_SETTINGS.sheetTile} glyph={VAULT_SETTINGS.sheetGlyph} />}>{title}</DialogTitle>;
 }
 
 export function SheetText({ children }: { children: ReactNode }) {

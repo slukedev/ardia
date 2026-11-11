@@ -368,6 +368,9 @@ export const swatch = { size: 20, inset: 2, ring: 2, gap: space.m } as const;
 
 export const opacity = { disabled: 0.45 } as const;
 
+export const syncGlyph = { caption: { box: lineHeight.caption, glyph: 10 }, small: { box: lineHeight.small, glyph: 11 }, body: { box: lineHeight.body, glyph: 12 } } as const;
+export type SyncGlyphSize = keyof typeof syncGlyph;
+
 export const TOOLTIP = { padX: 6.5, padY: 5, radius: radius.control } as const;
 
 export const emptyState = { icon: 30, iconBox: 40, liftBottom: 80, subtitleMaxWidth: 360 } as const;

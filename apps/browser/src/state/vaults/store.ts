@@ -11,9 +11,10 @@ type VaultsState = {
   pending: PendingTotp[];
   loaded: boolean;
   revision: number;
+  unlocking: string[];
 };
 
-export const useVaults = create<VaultsState>()(() => ({ providers: [], items: {}, pending: [], loaded: false, revision: 0 }));
+export const useVaults = create<VaultsState>()(() => ({ providers: [], items: {}, pending: [], loaded: false, revision: 0, unlocking: [] }));
 
 const ITEMS_FRESH_MS = 30_000;
 const fetchedAt = new Map<string, number>();
@@ -48,6 +49,17 @@ export function applyProviderState(state: VaultProviderState) {
     return state.state === "unlocked" ? { providers } : { providers, ...dropItems(s, state.id) };
   });
   if (state.state === "unlocked" && before?.state !== "unlocked") void loadVaultItems(state.id, true);
+}
+
+export const setVaultUnlocking = (provider: string, on: boolean) =>
+  useVaults.setState((s) => ({ unlocking: on ? [...s.unlocking.filter((p) => p !== provider), provider] : s.unlocking.filter((p) => p !== provider) }));
+
+export function stageVaults(providers: VaultProviderState[], items: VaultItem[]) {
+  const now = Date.now();
+  for (const p of providers) if (p.state === "unlocked") fetchedAt.set(p.id, now);
+  const byProvider: Record<string, VaultItem[]> = {};
+  for (const i of items) (byProvider[i.provider] ??= []).push(i);
+  change(() => ({ providers: byBrandOrder(providers), items: byProvider, loaded: true }));
 }
 
 export function clearVaultIndex() {

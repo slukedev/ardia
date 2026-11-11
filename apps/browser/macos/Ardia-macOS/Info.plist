@@ -143,7 +143,7 @@
 		<true/>
 	</dict>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Ardia asks Dia for its profiles, open tabs and pinned tabs when you import them. It only reads them and changes nothing in Dia.</string>
+	<string>Ardia asks Dia for its profiles, open tabs and pinned tabs when you import them, and asks Google Chrome to open its password import when you save a login to Google Password Manager. It changes nothing else in either app.</string>
 	<key>NSAppleScriptEnabled</key>
 	<true/>
 	<key>NSAudioCaptureUsageDescription</key>

@@ -59,6 +59,7 @@ const oneOf = <const V extends readonly string[]>(values: V, d: V[number], synce
 const shaped = <T,>(d: T, valid: (v: unknown) => boolean, schema: JsonSchema, synced = false): SettingSpec<T> => ({ default: d, valid, synced, schema });
 
 export const VAULT_LOCK_MINUTES = [5, 15, 30, 60, 0] as const;
+export const VAULT_SYNC_INTERVALS = ["automatic", "every5Minutes", "every15Minutes", "everyHour", "manual"] as const;
 
 export const SETTING_SPECS = {
   warnBeforeQuitting: flag(false, SYNCED),
@@ -145,6 +146,7 @@ export const SETTING_SPECS = {
   vaultMenuGlass: flag(true, SYNCED),
   vaultAskBeforeFilling: flag(true),
   vaultLoadPasswordsWhenUsed: flag(false),
+  vaultSyncInterval: oneOf(VAULT_SYNC_INTERVALS, "automatic"),
   vaultSaveOffer: flag(true, SYNCED),
   vaultSaveTarget: text(""),
   vaultIdleLockMinutes: shaped<number>(30, (v) => (VAULT_LOCK_MINUTES as readonly unknown[]).includes(v), { type: "number", enum: VAULT_LOCK_MINUTES }),

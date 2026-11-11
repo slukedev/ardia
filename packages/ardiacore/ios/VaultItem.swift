@@ -9,10 +9,16 @@ struct VaultItem: Codable, Equatable, Sendable {
   var favorite: Bool? = nil
   var updatedAt: Double? = nil
   var totpPeriod: Int? = nil
+  var pending: Bool? = nil
 
   enum CodingKeys: String, CodingKey {
-    case provider, id, title, username, urls, hasTotp, vault, favorite, updatedAt
+    case provider, id, title, username, urls, hasTotp, vault, favorite, updatedAt, pending
   }
 
   func jsonObject() -> [String: Any] { VaultJSON.object(self) }
+}
+
+struct VaultItemList: Sendable {
+  var items: [VaultItem]
+  var passwords: [String: String] = [:]
 }

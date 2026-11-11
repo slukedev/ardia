@@ -171,7 +171,7 @@ export type VaultKeyPress = { frameId: string; key: VaultKey };
 export type VaultSubmission = { frameId: string; origin: string; username: string };
 export type VaultFillField = "username" | "password" | "totp";
 export type VaultFilledField = "username" | "password" | "newPassword" | "otp";
-export type VaultFillError = "locked" | "originMismatch" | "insecure" | "notFound" | "failed" | "notAuthorized";
+export type VaultFillError = "locked" | "originMismatch" | "insecure" | "notFound" | "failed" | "notAuthorized" | "automation";
 export type VaultFillRequest = { frameId: string; origin: string; provider: string; id: string; fields: VaultFillField[]; userChose?: boolean };
 export type VaultFillResult = { filled: VaultFilledField[]; error?: VaultFillError };
 export type VaultSavedItem = {
@@ -184,9 +184,10 @@ export type VaultSavedItem = {
   vault?: string;
   favorite?: boolean;
   updatedAt?: number;
+  pending?: boolean;
 };
 export type VaultSaveRequest = { provider: string; origin: string; title?: string };
-export type VaultSaveResult = { saved: boolean; item?: VaultSavedItem; error?: string };
+export type VaultSaveResult = { saved: boolean; code?: string; importId?: string; reason?: string; action?: "updatePassword" | "confirm"; item?: VaultSavedItem; error?: string };
 
 export type WebViewProps = ViewProps & {
   engine?: PageEngine;
