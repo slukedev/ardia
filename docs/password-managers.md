@@ -211,10 +211,13 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
    keeps them; no secrets in it):
    - Without a fresh `rapt` (one seen in the last hour), a refresh happens only on unlock, on Sync Now (or Confirm…), or
      on the sync schedule, never because a list was used. Unlock and the schedule refresh at most once an hour after
-     the last success and 15 minutes after the last attempt; Sync Now skips those but not a 60 s spacing, and waits up
-     to 90 s for saves in flight instead of answering busy.
+     the last success and 15 minutes after the last attempt. Sync Now also waits an hour after the last success
+     (`personSyncAgainAt`, published as `syncAgainAt`): pressed earlier, Settings shows an alert with the time it may
+     run again and why, and Sync Anyway (`vaults.refresh` `anyway`, trigger `personAnyway`) skips the hour and the
+     backoff but not a 60 s spacing. A failed sync doesn't start the hour, so Try Again runs. Confirm… and a fill that
+     has no list yet run as `personAnyway`. A person run waits up to 90 s for saves in flight instead of answering busy.
    - With a fresh `rapt` the export needs no password check, so the schedule and using a list (also Ardia becoming
-     active after 5 minutes away) may refresh every 15 minutes after the last success, still 15 minutes after the last
+     active after 5 minutes away) may refresh an hour after the last success, still 15 minutes after the last
      attempt and outside any backoff or hold. Such a run never answers a check: if Google asks anyway it ends as
      `checkTooSoon` and the token is dropped, which puts the next run back on the hourly rule.
    - After an import is saved (Google has just handed back a fresh `rapt`), Ardia runs a reconcile export (trigger
@@ -322,8 +325,8 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
 - A Proton Pass session lock can only be lifted with `pass-cli session unlock` in Terminal.
 - 1Password's list has no one-time code flag, so `hasTotp` is unknown there and `vaults.totp` answers `null` when the
   item has none.
-- Google Password Manager reads the account's passwords as of the last export: every 15 minutes at most while a fresh
-  `rapt` is held, otherwise at most hourly by itself, or on Sync Now. How long Google honours a `rapt` isn't published;
+- Google Password Manager reads the account's passwords as of the last export: at most hourly by itself or on Sync
+  Now, plus the reconcile after a save and Sync Anyway. How long Google honours a `rapt` isn't published;
   Ardia counts one as fresh for an hour and drops it the first time Google asks for the password anyway. Passkeys, notes and Android app logins aren't read. The export flow follows passwords.google.com as measured
   in November 2026; a change fails as `pageChanged` until `GoogleImportSelectors` is updated.
 - Saving to Google needs Google signed in inside Ardia's default profile and the Google password saved in Ardia; a

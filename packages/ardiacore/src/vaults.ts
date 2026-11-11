@@ -22,6 +22,7 @@ export type VaultProviderState = {
   setup?: { kind: VaultSetupKind; appURL?: string };
   touchUnlock?: boolean;
   refreshedAt?: number;
+  syncAgainAt?: number;
   hold?: string;
   syncing?: boolean;
 };
@@ -66,7 +67,7 @@ export type VaultTotp = { code: string; period: number; expiresAt: number };
 export type VaultChromeProfile = { directory: string; name: string; email: string | null; selected: boolean };
 
 export type VaultGoogleImportState = "confirm" | "saved" | "failed";
-export type VaultGoogleExport = { provider: VaultProviderId; id: string; state: VaultGoogleImportState; trigger: "unlock" | "schedule" | "person" | "use" | "afterSave"; code?: string; message?: string };
+export type VaultGoogleExport = { provider: VaultProviderId; id: string; state: VaultGoogleImportState; trigger: "unlock" | "schedule" | "person" | "personAnyway" | "use" | "afterSave"; code?: string; message?: string };
 export type VaultGoogleImport = { provider: VaultProviderId; id: string; state: VaultGoogleImportState; host: string; code?: string; message?: string };
 export type VaultGoogleAccount = { email: string | null; hasPassword: boolean };
 export type VaultGoogleSignIn = "signedIn" | "signIn" | "insecureBrowser" | "network" | "unavailable";

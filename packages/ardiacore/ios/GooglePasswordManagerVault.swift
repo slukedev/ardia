@@ -43,9 +43,12 @@ struct GooglePasswordManagerVault: VaultProvider {
     let importer = GoogleWebImporter.shared
     var state = makeState(webPassword(cli) == nil ? .locked : .unlocked, account: GoogleAccountPassword.email())
     state.refreshedAt = importer.lastRefresh.map { $0.timeIntervalSince1970 * 1000 }
+    state.syncAgainAt = importer.limits.personSyncAgainAt(now: Date()).map { $0.timeIntervalSince1970 * 1000 }
     if let held = importer.heldBy {
       state.hold = held.rawValue
       state.message = held.message
+    } else if let failed = importer.failedWith {
+      state.message = failed.message
     }
     return state
   }
@@ -149,7 +152,7 @@ struct GooglePasswordManagerVault: VaultProvider {
     if Self.usesWeb {
       guard field != .totp, GoogleExportCSV.isValidId(itemId) else { throw VaultError.notFound }
       var rows = await GoogleWebImporter.shared.latestRows
-      if rows == nil { rows = try await webRows(cli, trigger: .person) }
+      if rows == nil { rows = try await webRows(cli, trigger: .personAnyway) }
       guard let row = rows?.first(where: { GoogleExportCSV.itemId(url: $0.url, username: $0.username) == itemId }) else { throw VaultError.notFound }
       let value = field == .username ? row.username : row.password
       guard !value.isEmpty else { throw VaultError.notFound }

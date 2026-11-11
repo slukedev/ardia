@@ -5,8 +5,13 @@ enum GoogleWebTrigger: String, Sendable {
   case unlock
   case schedule
   case person
+  case personAnyway
   case use
   case afterSave
+}
+
+extension GoogleWebTrigger {
+  var byPerson: Bool { self == .person || self == .personAnyway }
 }
 
 struct GoogleWebAdmission: Equatable, Sendable {
@@ -27,7 +32,8 @@ struct GoogleWebLimits: Codable, Equatable, Sendable {
   static let personSpacing: TimeInterval = 60
   static let firstBackoff: TimeInterval = 900
   static let longestBackoff: TimeInterval = 21_600
-  static let freshRefreshSpacing: TimeInterval = 900
+  static let freshRefreshSpacing: TimeInterval = 3600
+  static let personSyncSpacing: TimeInterval = 3600
   static let afterSaveSpacing: TimeInterval = 60
   static let raptLifetime: TimeInterval = 3600
 
@@ -36,6 +42,7 @@ struct GoogleWebLimits: Codable, Equatable, Sendable {
   var lastCheck: Date?
   var failures = 0
   var lastFailure: Date?
+  var lastError: GoogleImportError?
   var held: GoogleImportError?
 
   static func backoff(afterFailures failures: Int) -> TimeInterval {
@@ -52,7 +59,10 @@ struct GoogleWebLimits: Codable, Equatable, Sendable {
     if busy { return GoogleWebAdmission(verdict: .busy, mayAnswerCheck: false) }
     let raptFresh = raptSeen.map { now.timeIntervalSince($0) < Self.raptLifetime } ?? false
     switch trigger {
-    case .person:
+    case .person, .personAnyway:
+      if trigger == .person, let personSyncAgainAt = personSyncAgainAt(now: now) {
+        return GoogleWebAdmission(verdict: .notDue(until: personSyncAgainAt), mayAnswerCheck: false)
+      }
       if let lastAttempt, now.timeIntervalSince(lastAttempt) < Self.personSpacing {
         return GoogleWebAdmission(verdict: .notDue(until: lastAttempt.addingTimeInterval(Self.personSpacing)), mayAnswerCheck: false)
       }
@@ -79,6 +89,12 @@ struct GoogleWebLimits: Codable, Equatable, Sendable {
       guard raptFresh else { return GoogleWebAdmission(verdict: .notDue(until: slow), mayAnswerCheck: false) }
       return checkless(fastDue, now: now)
     }
+  }
+
+  func personSyncAgainAt(now: Date) -> Date? {
+    guard let lastSuccess else { return nil }
+    let until = lastSuccess.addingTimeInterval(Self.personSyncSpacing)
+    return now < until ? until : nil
   }
 
   private var backoffEnd: Date? {
@@ -116,6 +132,7 @@ struct GoogleWebLimits: Codable, Equatable, Sendable {
     lastSuccess = now
     failures = 0
     lastFailure = nil
+    lastError = nil
     held = nil
   }
 
@@ -127,6 +144,7 @@ struct GoogleWebLimits: Codable, Equatable, Sendable {
     guard error != .cancelled, error != .notAllowed, error != .checkTooSoon else { return }
     failures += 1
     lastFailure = now
+    lastError = error
   }
 
   mutating func personConfirmed() { held = nil }

@@ -190,7 +190,7 @@ export type EngineCalls = {
   "webKit.requestPasskeyAccess": [{}, PasskeyAccess];
 
   "vaults.providers": [{}, VaultProviderState[]];
-  "vaults.refresh": [{ provider: VaultProviderId }, VaultProviderState];
+  "vaults.refresh": [{ provider: VaultProviderId; anyway?: boolean }, VaultProviderState];
   "vaults.items": [{ provider?: VaultProviderId }, VaultItem[]];
   "vaults.lock": [{ provider: VaultProviderId }, VaultProviderState];
   "vaults.signOut": [{ provider: VaultProviderId }, VaultProviderState];

@@ -26,12 +26,27 @@ struct GoogleWebLimitsTests {
     #expect(GoogleWebLimits().verdict(trigger, now: now, busy: true) == .busy)
   }
 
-  @Test func `Sync Now skips the hour and the backoff but not a minute's spacing`() {
-    var limits = GoogleWebLimits(lastSuccess: ago(120), lastAttempt: ago(120))
+  @Test func `Sync Now waits an hour after the last successful sync`() {
+    let synced = GoogleWebLimits(lastSuccess: ago(3599), lastAttempt: ago(3599))
+    #expect(synced.verdict(.person, now: now, busy: false) == .notDue(until: ago(-1)))
+    #expect(synced.personSyncAgainAt(now: now) == ago(-1))
+    let hourLater = GoogleWebLimits(lastSuccess: ago(3600), lastAttempt: ago(3600))
+    #expect(hourLater.verdict(.person, now: now, busy: false) == .go)
+    #expect(hourLater.personSyncAgainAt(now: now) == nil)
+  }
+
+  @Test func `a failed sync doesn't start the hour, so Try Again can run`() {
+    var limits = GoogleWebLimits(lastSuccess: ago(7200), lastAttempt: ago(120))
     limits.failed(.network, now: ago(120))
     #expect(limits.verdict(.person, now: now, busy: false) == .go)
-    let justTried = GoogleWebLimits(lastAttempt: ago(30))
-    #expect(justTried.verdict(.person, now: now, busy: false) == .notDue(until: ago(-30)))
+  }
+
+  @Test func `Sync Anyway skips the hour and the backoff but not a minute's spacing`() {
+    var limits = GoogleWebLimits(lastSuccess: ago(120), lastAttempt: ago(120))
+    limits.failed(.network, now: ago(120))
+    #expect(limits.verdict(.personAnyway, now: now, busy: false) == .go)
+    let justTried = GoogleWebLimits(lastSuccess: ago(30), lastAttempt: ago(30))
+    #expect(justTried.verdict(.personAnyway, now: now, busy: false) == .notDue(until: ago(-30)))
   }
 
   @Test func `failures back off 15 minutes, then 30, doubling up to 6 hours`() {

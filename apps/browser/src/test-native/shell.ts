@@ -2,6 +2,7 @@ import type {
   AppEvent,
   BangListReply,
   CommandEvent,
+  ConfirmOptions,
   LaunchConfig,
   OpenWindowOptions,
   ShellNativeModules,
@@ -25,6 +26,7 @@ type UserScriptsHost = {
 const testGlobals = globalThis as { acTestUserScripts?: UserScriptsHost };
 
 export const docs = new Map<string, string>();
+export const dialogFakes = { confirmed: false, asked: [] as ConfirmOptions[] };
 export const heldSaves = { on: false, queue: [] as (() => void)[] };
 export const bangListServer: { reply: ((etag: string | null) => Promise<BangListReply>) | null } = { reply: null };
 export const appInfo: Partial<SystemInfo> = { appVersion: "1.0" };
@@ -127,7 +129,7 @@ const menus: Modules["ArdiaMenus"] = {
 };
 
 const dialogs: Modules["ArdiaDialogs"] = {
-  confirm: () => Promise.resolve({ confirmed: false, suppressed: false }),
+  confirm: (options) => (dialogFakes.asked.push(options), Promise.resolve({ confirmed: dialogFakes.confirmed, suppressed: false })),
   prompt: () => Promise.resolve(null),
   pickFiles: () => Promise.resolve([]),
   pickFolder: () => Promise.resolve(null),

@@ -28,7 +28,12 @@ export function updatedLine(refreshedAt: number | undefined, now = Date.now()): 
   return `Updated ${dayFormat.format(then)}`;
 }
 
+export const clockTime = (at: number) => timeFormat.format(new Date(at));
+
 export const GOOGLE_HOLD_LINE = "Google needs you to confirm";
+export const GOOGLE_FAILED_LINE = "Couldn't update";
+
+export const googleUpdateFailed = (p: Pick<VaultProviderState, "state" | "message" | "hold">) => p.state === "unlocked" && !p.hold && !!p.message;
 
 export function chromeStatusLine(p: Pick<VaultProviderState, "state" | "account" | "message" | "refreshedAt" | "hold">, now = Date.now()): string | undefined {
   switch (p.state) {
@@ -38,7 +43,7 @@ export function chromeStatusLine(p: Pick<VaultProviderState, "state" | "account"
     case "locked":
       return p.message || [p.account, "Locked"].filter(Boolean).join(" · ");
     case "unlocked":
-      return [p.account, p.hold ? GOOGLE_HOLD_LINE : updatedLine(p.refreshedAt, now)].filter(Boolean).join(" · ") || undefined;
+      return [p.account, p.hold ? GOOGLE_HOLD_LINE : googleUpdateFailed(p) ? GOOGLE_FAILED_LINE : updatedLine(p.refreshedAt, now)].filter(Boolean).join(" · ") || undefined;
     default:
       return p.message || "Not available";
   }

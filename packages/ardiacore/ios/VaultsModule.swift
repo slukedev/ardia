@@ -77,7 +77,8 @@ public class VaultsModule: Module {
     "providers": { _, reply in VaultsModule.answer(reply) { await VaultBroker.shared.providerStates().map { $0.jsonObject() } } },
     "refresh": { args, reply in
       let id = try VaultsModule.provider(args)
-      VaultsModule.answer(reply) { await VaultBroker.shared.refresh(id, explicit: true)?.jsonObject() }
+      let anyway = try args.optionalBool("anyway") ?? false
+      VaultsModule.answer(reply) { await VaultBroker.shared.refresh(id, explicit: true, anyway: anyway)?.jsonObject() }
     },
     "items": { args, reply in
       let id = try VaultsModule.optionalProvider(args)

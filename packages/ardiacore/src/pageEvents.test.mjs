@@ -17,7 +17,7 @@ const chromiumEmitters = files(/\.mm$/).map(native);
 const webKitTab = files(/^WebKitTab.*\.swift$/).map(native);
 const pageScript = native("page_script.js");
 const messageReceivers = ["ArdiaWebView+PageMessages.mm", "ArdiaWebView+Peek.mm"].map(native);
-const hiddenPageDriver = native("GoogleWebImporter.swift");
+const hiddenPageDriver = files(/^GoogleWebImporter.*\.swift$/).map(native).join("\n");
 
 test("the Chromium view emits every page event in PAGE_EVENTS, and nothing else", () => {
   assert.deepEqual(sorted(collect(chromiumEmitters, /\bemit:@"([A-Za-z]+)"\s+payload:/g)), sorted(PAGE_EVENTS));

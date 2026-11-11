@@ -25,9 +25,13 @@ NSCountedSet<NSString *> *BlockedDownloadOrigins() {
   return origins;
 }
 
-bool IsBlockedDownload(NSString *url) {
+bool IsBlockedDownload(NSString *url, NSString *mimeType) {
   if (![url isKindOfClass:NSString.class]) return false;
-  if (BlockedDownloadOrigins().count && [url.lowercaseString hasPrefix:@"data:text/csv"]) return true;
+  if (!BlockedDownloadOrigins().count) return false;
+  NSString *lower = url.lowercaseString;
+  if ([lower hasPrefix:@"data:text/csv"]) return true;
+  bool csv = [mimeType isKindOfClass:NSString.class] && [mimeType.lowercaseString hasPrefix:@"text/csv"];
+  if (csv && [lower hasPrefix:@"blob:null/"]) return true;
   for (NSString *origin in BlockedDownloadOrigins())
     if ([url hasPrefix:[@"blob:" stringByAppendingString:origin]]) return true;
   return false;
@@ -41,7 +45,12 @@ void WatchBlockedDownloads() {
                       handler:^(NSDictionary *payload) {
                         NSDictionary *download = [payload[@"download"] isKindOfClass:NSDictionary.class] ? payload[@"download"] : nil;
                         NSString *downloadId = [download[@"id"] isKindOfClass:NSString.class] ? download[@"id"] : nil;
-                        if (!downloadId || !IsBlockedDownload(download[@"url"])) return;
+                        if (!downloadId) return;
+                        if (!IsBlockedDownload(download[@"url"], download[@"mimeType"])) {
+                          if (BlockedDownloadOrigins().count)
+                            NSLog(@"[vaults] download during a hidden page export was not blocked: %@", [download[@"url"] description].length > 48 ? [[download[@"url"] description] substringToIndex:48] : download[@"url"]);
+                          return;
+                        }
                         NSString *state = [download[@"state"] isKindOfClass:NSString.class] ? download[@"state"] : @"";
                         NSLog(@"[vaults] hidden page download blocked (%@)", state);
                         if ([state isEqualToString:@"downloading"]) return [ArdiaServices downloadCommand:@"cancel" id:downloadId];
@@ -225,7 +234,7 @@ void WatchBlockedDownloads() {
   if (_blockedOrigin) {
     NSString *origin = _blockedOrigin;
     _blockedOrigin = nil;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [BlockedDownloadOrigins() removeObject:origin];
     });
   }

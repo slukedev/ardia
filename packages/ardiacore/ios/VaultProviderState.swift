@@ -13,6 +13,7 @@ struct VaultProviderState: Codable, Equatable, Sendable {
   var setup: VaultSetup? = nil
   var touchUnlock = false
   var refreshedAt: Double? = nil
+  var syncAgainAt: Double? = nil
   var hold: String? = nil
   var syncing = false
 

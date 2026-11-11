@@ -2,8 +2,8 @@ import Foundation
 
 extension GoogleWebImporter {
   func export(trigger: GoogleWebTrigger, password: String?) async -> GoogleExportReply {
-    if let job = exporting, trigger == .person, let person = job.person { return .confirm(id: job.id, error: person) }
-    if trigger == .person {
+    if let job = exporting, trigger.byPerson, let person = job.person { return .confirm(id: job.id, error: person) }
+    if trigger.byPerson {
       let deadline = Date().addingTimeInterval(Self.personWaitForImports)
       while running != nil || !queue.isEmpty, Date() < deadline { try? await Task.sleep(nanoseconds: Self.pollInterval) }
     }
@@ -63,11 +63,13 @@ extension GoogleWebImporter {
     }
     var flow = GoogleExportFlow(started: Date(), mayAnswerCheck: job.mayAnswerCheck)
     var password = given
+    var lastSnapshot: GoogleImportSnapshot?
     while true {
       try? await Task.sleep(nanoseconds: Self.pollInterval)
       if let failure = job.failure { return .failed(failure) }
       if page.closed { return .failed(.cancelled) }
       let snapshot = job.csv == nil ? await snapshot(page) : nil
+      if let snapshot { lastSnapshot = snapshot }
       let stage = snapshot.map { GoogleImportClassifier.classify($0, site: site) } ?? .loading
       switch flow.step(stage, exportButton: snapshot?.exportButton == true, captured: job.csv != nil, now: Date()) {
       case .wait:
@@ -98,7 +100,7 @@ extension GoogleWebImporter {
         guard let csv = job.csv, let rows = GoogleExportCSV.rows(csv) else { return .failed(.pageChanged) }
         return .list(rows)
       case .needPerson(let error):
-        guard job.trigger == .person else { return .failed(error) }
+        guard job.trigger.byPerson else { return .failed(error) }
         if job.person == nil {
           job.person = error
           flow.personStarted(Date())
@@ -107,6 +109,7 @@ extension GoogleWebImporter {
         }
       case .fail(let error):
         if error == .checkTooSoon, rapt == usedRapt { rapt = nil }
+        NSLog("[vaults] google export stopped at %@", Self.describe(lastSnapshot, stage: stage, url: page.url))
         return .failed(error)
       }
     }
@@ -153,5 +156,12 @@ extension GoogleWebImporter {
       payload["message"] = error.message
     }
     ArdiaEvents.emit("vaults.googleExport", data: payload)
+  }
+
+  static func describe(_ snapshot: GoogleImportSnapshot?, stage: GoogleImportStage, url: String) -> String {
+    let address = URLComponents(string: snapshot?.url ?? url).map { "\($0.host ?? "")\($0.path)" } ?? ""
+    guard let snapshot else { return "\(stage) \(address) no snapshot" }
+    let buttons = snapshot.dialogButtons.joined(separator: "|")
+    return "\(stage) \(address) ready=\(snapshot.ready) export=\(snapshot.exportButton.map(String.init) ?? "nil") dialog=\(snapshot.dialog ?? "nil") buttons=\(buttons) text=\(snapshot.text.count)"
   }
 }

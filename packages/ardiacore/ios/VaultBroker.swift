@@ -34,14 +34,14 @@ actor VaultBroker {
     return VaultRegistry.providers.map { states[$0.id] ?? placeholder($0) }
   }
 
-  func refresh(_ id: String, explicit: Bool = false) async -> VaultProviderState? {
+  func refresh(_ id: String, explicit: Bool = false, anyway: Bool = false) async -> VaultProviderState? {
     guard let provider = VaultRegistry.provider(id) else { return nil }
     if explicit {
       sessions.clearScratch(id)
       if id == GooglePasswordManagerVault.providerId, GooglePasswordManagerVault.usesWeb {
         await GoogleWebImporter.shared.personConfirmed()
         if sessions.session(id) != nil {
-          await VaultRefreshReason.$current.withValue(.person) { _ = await fetchItems(provider) }
+          await VaultRefreshReason.$current.withValue(anyway ? .personAnyway : .person) { _ = await fetchItems(provider) }
         }
         return await currentState(provider)
       }

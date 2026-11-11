@@ -1585,22 +1585,41 @@
           return false;
         }
       };
+      const capturedBlobs = new WeakSet();
+      const UrlClass = typeof URL === "function" ? URL : null;
+      const nativeCreateObjectURL = UrlClass && UrlClass.createObjectURL;
+      const nativeDispatch = EventTarget.prototype.dispatchEvent;
+      const isCsvType = (options) => {
+        const type = options && typeof options.type === "string" ? options.type.toLowerCase() : "";
+        return type.startsWith("text/csv");
+      };
       const capture = (parts, options) => {
         try {
-          const type = options && typeof options.type === "string" ? options.type.toLowerCase() : "";
-          if (!type.startsWith("text/csv") || !Array.isArray(parts) || !parts.length || !parts.every((part) => typeof part === "string")) return;
+          if (!isCsvType(options) || !Array.isArray(parts) || !parts.length || !parts.every((part) => typeof part === "string")) return false;
           send("csvExport", { text: parts.join("") });
-        } catch (e) {}
+          return true;
+        } catch (e) {
+          return false;
+        }
       };
       setCsvExport = (origin) => {
         if (exporting || typeof origin !== "string" || origin !== location.origin) return;
         exporting = true;
         window.Blob = new Proxy(NativeBlob, {
           construct(target, args, newTarget) {
-            capture(args[0], args[1]);
-            return Reflect.construct(target, args, newTarget);
+            const captured = capture(args[0], args[1]);
+            const blob = Reflect.construct(target, args, newTarget);
+            if (captured || isCsvType(args[1])) capturedBlobs.add(blob);
+            return blob;
           },
         });
+        if (nativeCreateObjectURL) UrlClass.createObjectURL = asNative(nativeCreateObjectURL, (target, self, args) => {
+          if (args[0] && capturedBlobs.has(args[0])) throw new TypeError("Failed to execute 'createObjectURL' on 'URL'");
+          return apply(target, self, args);
+        });
+        if (nativeDispatch) EventTarget.prototype.dispatchEvent = asNative(nativeDispatch, (target, self, args) =>
+          args[0] && args[0].type === "click" && isDownloadLink(self) ? true : apply(target, self, args),
+        );
         AnchorProto.click = asNative(nativeAnchorClick, (target, self, args) => (isDownloadLink(self) ? undefined : apply(target, self, args)));
         window.open = asNative(nativeOpen, (target, self, args) => (/^\s*(blob|data):/i.test(String(args[0] || "")) ? null : apply(target, self, args)));
         apply(listenFor, window, [

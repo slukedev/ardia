@@ -192,6 +192,7 @@ final class GoogleWebImporter {
   var lastRefresh: Date? { limits.lastSuccess }
 
   var heldBy: GoogleImportError? { limits.held }
+  var failedWith: GoogleImportError? { limits.failures > 0 ? limits.lastError : nil }
 
   func personConfirmed() {
     limits.personConfirmed()

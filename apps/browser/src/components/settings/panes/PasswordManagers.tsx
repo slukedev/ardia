@@ -5,9 +5,10 @@ import { useSettings } from "../../../state/browser/hooks";
 import { updateSettings } from "../../../state/settings/actions";
 import { VAULT_LOCK_MINUTES } from "../../../state/settings/settings";
 import { lockProvider, refreshProvider, reloadProviders, signInError, signOutProvider, unlockProvider, type VaultProviderState } from "../../../state/vaults/actions";
-import { chromeStatusLine, forgetGoogleAccountPassword, isChromeVault, loadGoogleAccount, useGoogleAccount } from "../../../state/vaults/google";
+import { chromeStatusLine, googleUpdateFailed, forgetGoogleAccountPassword, isChromeVault, loadGoogleAccount, useGoogleAccount } from "../../../state/vaults/google";
 import { useVaultProviders, useVaultsLoaded, useVaultSyncStatus, useVaultUnlocking } from "../../../state/vaults/hooks";
 import { syncVault } from "../../../state/vaults/sync";
+import { syncVaultAsking } from "../../../state/vaults/syncLimit";
 import { Box, Button, PopUp, space } from "../../ui";
 import { BrandBadge, VaultSyncStatus } from "../../vaults/VaultParts";
 import { VAULT_SETTINGS } from "../../vaults/tokens";
@@ -76,7 +77,7 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
     if (choice === "forgetGooglePassword") return void forgetGoogleAccountPassword();
     if (choice === "lock") await lockProvider(provider.id);
     if (choice === "refresh") await refreshProvider(provider.id);
-    if (choice === "sync") void syncVault(provider.id);
+    if (choice === "sync") void syncVaultAsking(provider.id);
     if (choice !== "signOut") return;
     const { confirmed } = await confirm({ title: leave.title, message: leave.message, confirmTitle: leave.confirm });
     if (confirmed) await signOutProvider(provider.id);
@@ -91,7 +92,8 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
       <Box row gap="s" center>
         <VaultSyncStatus status={sync} />
         {provider.state === "locked" ? <Button title={busy ? "Unlocking…" : "Unlock"} disabled={busy} onPress={() => void unlock()} /> : null}
-        {provider.state === "unlocked" && provider.hold && !syncing ? <Button title="Confirm…" onPress={() => void syncVault(provider.id)} /> : null}
+        {provider.state === "unlocked" && provider.hold && !syncing ? <Button title="Confirm…" onPress={() => void syncVault(provider.id, { anyway: true })} /> : null}
+        {chrome && googleUpdateFailed(provider) && !syncing ? <Button title="Try Again" tooltip={provider.message} onPress={() => void syncVaultAsking(provider.id)} /> : null}
         {connected ? (
           <Button variant="icon" icon="ellipsis.circle" size="l" tooltip="More" onPress={() => void more()} />
         ) : chrome ? (

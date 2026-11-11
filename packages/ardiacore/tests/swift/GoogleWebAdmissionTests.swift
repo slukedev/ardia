@@ -36,10 +36,10 @@ struct GoogleWebAdmissionTests {
   }
 
   @Test(arguments: [GoogleWebTrigger.schedule, .use])
-  func `with a fresh rapt, refreshes come every 15 minutes without a check`(trigger: GoogleWebTrigger) {
-    let due = GoogleWebLimits(lastSuccess: ago(900), lastAttempt: ago(900))
-    #expect(admit(due, trigger, rapt: ago(60)) == GoogleWebAdmission(verdict: .go, mayAnswerCheck: false))
-    let early = GoogleWebLimits(lastSuccess: ago(899), lastAttempt: ago(899))
+  func `with a fresh rapt, refreshes still keep the hour`(trigger: GoogleWebTrigger) {
+    let due = GoogleWebLimits(lastSuccess: ago(3600), lastAttempt: ago(3600))
+    #expect(admit(due, trigger, rapt: ago(60)).verdict == .go)
+    let early = GoogleWebLimits(lastSuccess: ago(3599), lastAttempt: ago(3599))
     #expect(admit(early, trigger, rapt: ago(60)).verdict == .notDue(until: ago(-1)))
   }
 
@@ -71,7 +71,7 @@ struct GoogleWebAdmissionTests {
   }
 
   @Test func `the fast refresh still keeps 15 minutes from the last attempt and the backoff`() {
-    let recentAttempt = GoogleWebLimits(lastSuccess: ago(2000), lastAttempt: ago(600))
+    let recentAttempt = GoogleWebLimits(lastSuccess: ago(4000), lastAttempt: ago(600))
     #expect(admit(recentAttempt, .schedule, rapt: ago(60)).verdict == .notDue(until: ago(600 - 900)))
     var failing = GoogleWebLimits(lastSuccess: ago(4000), lastAttempt: ago(1000))
     failing.failed(.network, now: ago(1000))
@@ -86,12 +86,12 @@ struct GoogleWebAdmissionTests {
     #expect(admit(limits, trigger, rapt: ago(60)).verdict == .held(.twoStep))
   }
 
-  @Test func `Sync Now is unchanged and may answer a check`() {
+  @Test func `Sync Anyway may answer a check`() {
     let limits = GoogleWebLimits(lastSuccess: ago(120), lastAttempt: ago(120), lastCheck: ago(60))
-    #expect(admit(limits, .person) == GoogleWebAdmission(verdict: .go, mayAnswerCheck: true))
+    #expect(admit(limits, .personAnyway) == GoogleWebAdmission(verdict: .go, mayAnswerCheck: true))
   }
 
-  @Test(arguments: [GoogleWebTrigger.afterSave, .use, .schedule, .person])
+  @Test(arguments: [GoogleWebTrigger.afterSave, .use, .schedule, .person, .personAnyway])
   func `a busy page refuses every trigger`(trigger: GoogleWebTrigger) {
     #expect(GoogleWebLimits().admission(trigger, now: now, busy: true, raptSeen: ago(5)).verdict == .busy)
   }

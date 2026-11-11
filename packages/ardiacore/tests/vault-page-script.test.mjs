@@ -769,6 +769,8 @@ function makeExportPage({ origin = "https://passwords.google.com" } = {}) {
       clicked.push(this.attrs.href);
     }
   }
+  const dispatched = [];
+  const urls = [];
   const window = {
     Blob,
     open: (url) => (opened.push(url), {}),
@@ -778,7 +780,13 @@ function makeExportPage({ origin = "https://passwords.google.com" } = {}) {
     Blob,
     HTMLAnchorElement,
     Element,
-    EventTarget: { prototype: { addEventListener: function (type, fn, capture) { this.addEventListener(type, fn, capture); } } },
+    EventTarget: {
+      prototype: {
+        addEventListener: function (type, fn, capture) { this.addEventListener(type, fn, capture); },
+        dispatchEvent: function (event) { dispatched.push(event.type); return true; },
+      },
+    },
+    URL: Object.assign(function URL() {}, { createObjectURL: (blob) => `blob:${origin}/${urls.push(blob)}` }),
     Event: { prototype: { preventDefault() { this.prevented = true; } } },
     window,
     location: { origin },
@@ -792,7 +800,7 @@ function makeExportPage({ origin = "https://passwords.google.com" } = {}) {
     send: (kind, data) => sent.push({ kind, data }),
   };
   const api = runInNewContext(`let setCsvExport = () => {};\n{\n${exportBlock}\n}\n({ setCsvExport: (o) => setCsvExport(o) })`, context);
-  return { ...context, api, sent, listeners, opened, clicked };
+  return { ...context, api, sent, listeners, opened, clicked, dispatched, urls };
 }
 
 test("the export page hands Google's CSV to native in memory and leaves other blobs alone", () => {
@@ -827,4 +835,18 @@ test("in the export page a download link, a blob window or a download click goes
   const event = { target: new page.Element({ href: "data:text/csv,x" }), preventDefault: page.Event.prototype.preventDefault };
   capture.fn(event);
   assert.equal(event.prevented, true);
+});
+
+test("in the export page Google's CSV never becomes a URL and a dispatched download click goes nowhere", () => {
+  const page = makeExportPage();
+  page.api.setCsvExport("https://passwords.google.com");
+  const csv = new page.window.Blob(["name,url,username,password,note\n"], { type: "text/csv;charset=utf-8;" });
+  assert.throws(() => page.URL.createObjectURL(csv), { name: "TypeError" });
+  const html = new page.window.Blob(["<b>hi</b>"], { type: "text/html" });
+  assert.equal(page.URL.createObjectURL(html), "blob:https://passwords.google.com/1");
+  const link = new page.HTMLAnchorElement({ href: "blob:https://passwords.google.com/1", download: "Google Passwords.csv" });
+  assert.equal(page.EventTarget.prototype.dispatchEvent.call(link, { type: "click" }), true);
+  const help = new page.HTMLAnchorElement({ href: "https://passwords.google.com/help" });
+  page.EventTarget.prototype.dispatchEvent.call(help, { type: "click" });
+  assert.deepEqual(page.dispatched, ["click"]);
 });

@@ -42,9 +42,9 @@ export function nativeSyncSettled(provider: string, limit = NATIVE_SYNC_LIMIT_MS
   });
 }
 
-async function syncOne(provider: string) {
+async function syncOne(provider: string, anyway = false) {
   try {
-    applyProviderState(await refreshVault(provider));
+    applyProviderState(await refreshVault(provider, anyway));
     await nativeSyncSettled(provider);
     await loadVaultItems(provider, true);
     const state = vaultProviderOf(provider);
@@ -54,17 +54,19 @@ async function syncOne(provider: string) {
   }
 }
 
-export async function syncVault(provider: string) {
+export async function syncVault(provider: string, { anyway = false } = {}) {
   if (useVaultSync.getState()[provider] === "syncing") return;
   mark(provider, "syncing");
-  mark(provider, (await syncOne(provider)) ? "synced" : null);
+  mark(provider, (await syncOne(provider, anyway)) ? "synced" : null);
 }
 
-export async function syncEveryVault() {
+export async function syncEveryVault(except: readonly string[] = []) {
   if (useVaultSync.getState()[EVERY_VAULT] === "syncing") return;
-  const unlocked = currentVaultProviders().filter((p) => p.state === "unlocked").map((p) => p.id);
+  const unlocked = currentVaultProviders()
+    .filter((p) => p.state === "unlocked" && !except.includes(p.id))
+    .map((p) => p.id);
   if (!unlocked.length) return;
   mark(EVERY_VAULT, "syncing");
-  const results = await Promise.all(unlocked.map(syncOne));
+  const results = await Promise.all(unlocked.map((id) => syncOne(id)));
   mark(EVERY_VAULT, results.some(Boolean) ? "synced" : null);
 }
