@@ -9,7 +9,7 @@ import { googleUpdateFailed, forgetGoogleAccountPassword, isChromeVault, loadGoo
 import { chooseGoogleSource, googleSourceMenu, googleStatusLine, sourceChoiceOf } from "../../../state/vaults/googleSource";
 import { useVaultProviders, useVaultsLoaded, useVaultSyncStatus, useVaultUnlocking } from "../../../state/vaults/hooks";
 import { syncVault } from "../../../state/vaults/sync";
-import { syncVaultAsking } from "../../../state/vaults/syncLimit";
+import { FULL_SYNC_TITLE, fullSyncAsking, offersFullSync } from "../../../state/vaults/syncLimit";
 import { Box, Button, PopUp, space } from "../../ui";
 import { BrandBadge, VaultSyncStatus } from "../../vaults/VaultParts";
 import { VAULT_SETTINGS } from "../../vaults/tokens";
@@ -68,6 +68,7 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
         ? [
             { separator: true as const },
             googleSourceMenu(provider),
+            ...(offersFullSync(provider) ? [{ id: "fullSync", title: FULL_SYNC_TITLE, symbol: "arrow.down.circle", enabled: !syncing }] : []),
             { id: "googlePassword", title: googlePassword ? "Update Google Password…" : "Save Google Password…", symbol: "key" },
             ...(googlePassword ? [{ id: "forgetGooglePassword", title: "Forget Google Password", symbol: "trash" }] : []),
           ]
@@ -81,7 +82,8 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
     if (choice === "forgetGooglePassword") return void forgetGoogleAccountPassword();
     if (choice === "lock") await lockProvider(provider.id);
     if (choice === "refresh") await refreshProvider(provider.id);
-    if (choice === "sync") void syncVaultAsking(provider.id);
+    if (choice === "sync") void syncVault(provider.id);
+    if (choice === "fullSync") void fullSyncAsking(provider.id);
     if (choice !== "signOut") return;
     const { confirmed } = await confirm({ title: leave.title, message: leave.message, confirmTitle: leave.confirm });
     if (confirmed) await signOutProvider(provider.id);
@@ -97,7 +99,7 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
         <VaultSyncStatus status={sync} />
         {provider.state === "locked" ? <Button title={busy ? "Unlocking…" : "Unlock"} disabled={busy} onPress={() => void unlock()} /> : null}
         {provider.state === "unlocked" && provider.hold && !syncing ? <Button title="Confirm…" onPress={() => void syncVault(provider.id, { anyway: true })} /> : null}
-        {chrome && googleUpdateFailed(provider) && !syncing ? <Button title="Try Again" tooltip={provider.message} onPress={() => void syncVaultAsking(provider.id)} /> : null}
+        {chrome && googleUpdateFailed(provider) && !syncing ? <Button title="Try Again" tooltip={provider.message} onPress={() => void syncVault(provider.id)} /> : null}
         {connected ? (
           <Button variant="icon" icon="ellipsis.circle" size="l" tooltip="More" onPress={() => void more()} />
         ) : chrome ? (

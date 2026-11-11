@@ -72,6 +72,7 @@ ArdiaWebView+PageTab ── fillValues / save ───────────�
 | `ChromeLogins.swift`, `ChromeProfiles.swift` | Pure, Foundation-only: the snapshot reader for Chrome's `logins` table, v10 AES-CBC decryption, row to `VaultItem` mapping and ids, Chrome time, `Local State` parsing and profile choice. Built and tested on their own by `packages/ardiacore/Package.swift` (`swift test`, part of `pnpm -C packages/ardiacore test`). |
 | `ChromeInstallation.swift`, `ChromeSafeStorage.swift` | Where Chrome and its User Data folder are (the fixture copy in a test instance), and reading the "Chrome Safe Storage" keychain item. |
 | `GoogleWebImporter.swift`, `GoogleWebImportRules.swift`, `GoogleWebImportScripts.swift` | Reading from and saving to Google: the hidden page's driver (one operation at a time, import queue and dedupe, the export job, the kept `rapt`, the persisted limits, timeouts, events), and the pure parts: the selector table, page-state classification, the import step machine, the in-memory CSV and the error codes (`swift test`). |
+| `GoogleWebListRules.swift`, `GoogleWebImporter+List.swift`, `GooglePasswordManagerVault+Web.swift` | The light read of passwords.google.com's list (below): the pure parts (`swift test`) are the list selectors and snapshot, `GoogleListFlow` (the read's step machine), `GoogleListLimits` (its spacing), `GoogleListRows` (merging a read into the known logins, placeholders) and `GoogleSyncPlan` (which trigger reads and which exports); the importer extension drives the read's hidden page, and the provider extension routes each sync to a read or an export and resolves fills. |
 | `GoogleWebExportRules.swift` | Pure, tested with `swift test`: `GoogleWebLimits` (every rate limit for Google's site in one type), `GoogleExportFlow` (the export step machine), `GoogleRapt` (reading and adding the check's token), and `GoogleExportCSV` (the RFC 4180 parser and rows to `Google Account` items). |
 | `ArdiaHiddenPage.h/.mm` | A Chrome tab of the default profile that is never shown: opened in a stray window with no `NSWindow` on screen and parked off screen (`ArdiaTabParking keepOffscreen`), answering its page script's hello with its own config, and revealed in a sheet only when a person must act. |
 | `GoogleAccountPassword.swift` | The Google password Ardia answers Google's check with: one keychain item (service `dev.ardia.vaults.google-account`, account = email), read only after the owner check. |
@@ -112,7 +113,7 @@ Lock forgets the session; sign out also tells the CLI to log out. When a CLI rep
 out, the broker drops the session and the cached items and publishes the new state.
 
 `syncing` is true while that manager's list is being fetched for any reason (unlock, a refresh on use, the schedule,
-Sync Now, a Google export, a Google import in flight, a fill that has to read Google). It turns on only after the work
+Sync Now, a Google read or export, a Google import in flight, a fill that has to download from Google). It turns on only after the work
 has run 150 ms, so a refresh answered from the cache never flickers, and turns off as soon as the last piece of work
 ends; lock, sign out and any state other than `unlocked` clear it at once. Each flip is a `vaults.changed`.
 
@@ -220,8 +221,35 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
    federated sign-ins, empty passwords and non-web (Android) logins. A login in both stores is listed once, from the
    Google Account. Item ids are `account.` or `device.` plus 32 hex digits of SHA-256 over the store, origin, username
    and realm, and are validated before use.
-9. **Reading from Google.** Google has no API for listing passwords either, so Ardia runs passwords.google.com's own
-   export in the same hidden page (`GoogleWebImporter.export`, the provider's `itemsAndPasswords`):
+9. **Reading from Google.** Google has no API for listing passwords either. Ardia reads Google in two ways, in the same
+   hidden page: a light **read** of the list (Sync) and the site's own **export** (Full Sync), which is the only way to
+   get the passwords themselves.
+
+   **The read** (`GoogleWebImporter.list`, `GoogleListFlow`) opens `https://passwords.google.com/` with no export
+   config and no `rapt`, and polls a structure-only snapshot every 300 ms (scrolling to the end so a long list renders).
+   As measured in November 2026 on a signed-in account, the list is one `ul` whose rows are `li[data-id]` (a 44
+   character group id, `jsname="Sf4MPd"`), each with one link `a[href^="password/<46 character id>?ep=…"]` whose leaf
+   text is the site's display name (the domain without `www.`); usernames aren't on the page. Opening a site's
+   `password/<id>` page goes straight to Google's password check (`accounts.google.com/v3/signin/challenge/pwd`), so
+   the read never visits one and never types a password. The page loads with one document request (its data is
+   inline) and needs no check for a signed-in session. Ardia takes a row's first leaf as the site and a leaf like
+   `3 accounts` as its count when Google shows one, and finishes once the number of rows has held for 1.5 s (an empty
+   list only after 6 s with the page's search field showing). 15 s on one step or 30 s overall fails (`network`,
+   `pageChanged`, `timeout`); Google's password check ends it as `checkTooSoon`, and sign in, 2-Step Verification,
+   captcha or unusual activity end it with that error and set the hold below.
+
+   The read then merges into the logins the broker knows (`GoogleListRows.reconcile`): a known login whose host
+   matches no listed site (`VaultOriginMatch.hostsMatch`) is dropped; every other login keeps its id, so the broker
+   keeps its cached password; a listed site (a name that looks like a host) with no known login, or with more accounts
+   than Ardia knows, gets one placeholder item: title and URL from the site, no username, no password, id `web.` + 32
+   hex over `site:<name>`. A read with no sites while logins are known, or one that would drop more than half of them
+   (and more than 2), is distrusted and changes nothing. Filling or copying a placeholder (or any login whose
+   password isn't cached) runs the export as `personAnyway` unless an export ran in the last minute, in which case the
+   fill fails `notDownloaded` ("Google Password Manager hasn't downloaded this password yet. Try again in a minute.");
+   after that export a placeholder resolves to the site's only exported login, the list refreshes and the placeholder
+   gives way to the real items. A site with several exported logins answers `notFound` and the person picks again.
+
+   **The export** (`GoogleWebImporter.export`):
    1. `ArdiaHiddenPage` opens `/options` (with the kept `rapt`, below) and its config says `csvExport: true` with the
       passwords origin. Only then, and only when the top frame's own origin is that origin, the page script replaces
       `window.Blob` with a proxy that hands any `text/csv` Blob built from strings to native (`csvExport`), and makes
@@ -242,15 +270,26 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
       (`GoogleRapt`, only from the passwords origin, URL-safe characters only) and adds it to the next export and import
       URL; when Google asks for the password anyway, the token is dropped.
 
-   **Rate limits** (`GoogleWebLimits`, persisted to `Password Managers/Cache/google-web-limits.json` so a relaunch
+   **Which one runs** (`GoogleSyncPlan`): Sync Now (the Sync Passwords row and the ⋯ menu), Try Again and Ardia
+   becoming active only read. Unlock, the sync schedule and a list used while stale export when the export's rules
+   below allow it and read otherwise. Full Sync (⋯ menu, web source only, `vaults.refresh` `download`), Sync Anyway,
+   Confirm…, the reconcile after a save and a fill that needs a password only export.
+
+   **Read limits** (`GoogleListLimits`, in memory): a person's read waits up to 90 s for any other hidden-page
+   operation, then runs at most once a minute; it is never on the hourly rule. Automatic reads keep 15 minutes from the
+   last read attempt, read success or export, and stop while there is a hold. A read's success counts as the
+   `refreshedAt` the row shows, and clears a shown export failure older than it.
+
+   **Export limits** (`GoogleWebLimits`, persisted to `Password Managers/Cache/google-web-limits.json` so a relaunch
    keeps them; no secrets in it):
-   - Without a fresh `rapt` (one seen in the last hour), a refresh happens only on unlock, on Sync Now (or Confirm…), or
-     on the sync schedule, never because a list was used. Unlock and the schedule refresh at most once an hour after
-     the last success and 15 minutes after the last attempt. Sync Now also waits an hour after the last success
-     (`personSyncAgainAt`, published as `syncAgainAt`): pressed earlier, Settings shows an alert with the time it may
-     run again and why, and Sync Anyway (`vaults.refresh` `anyway`, trigger `personAnyway`) skips the hour and the
-     backoff but not a 60 s spacing. A failed sync doesn't start the hour, so Try Again runs. Confirm… and a fill that
-     has no list yet run as `personAnyway`. A person run waits up to 90 s for saves in flight instead of answering busy.
+   - Without a fresh `rapt` (one seen in the last hour), an export happens only on unlock, on Full Sync (or Confirm…),
+     or on the sync schedule, never because a list was used. Unlock and the schedule export at most once an hour after
+     the last success and 15 minutes after the last attempt. Full Sync also waits an hour after the last success
+     (`personSyncAgainAt`, published as `syncAgainAt`): chosen earlier, Settings shows the alert "Sync Again in N
+     Minutes" / "Frequent syncs can sign you out of Google." with Cancel as the default, and Sync Anyway (`vaults.refresh`
+     `anyway`, trigger `personAnyway`) skips the hour and the backoff but not a 60 s spacing. A failed export doesn't
+     start the hour. Confirm… and a fill that needs a password run as `personAnyway`. A person export waits up to 90 s
+     for saves and reads in flight instead of answering busy.
    - With a fresh `rapt` the export needs no password check, so the schedule and using a list (also Ardia becoming
      active after 5 minutes away) may refresh an hour after the last success, still 15 minutes after the last
      attempt and outside any backoff or hold. Such a run never answers a check: if Google asks anyway it ends as
@@ -266,11 +305,11 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
      browser, on-device encryption) stops all automatic runs (`hold`) until the person presses Confirm… on the row
      (Sync Now), which clears the hold and runs by the person; a person-run that meets such a page reveals it in a
      sheet (`vaults.googleExport` `confirm`).
-   - One hidden-page operation at a time: an export doesn't start while an import, another export or the sign-in
-     check runs, and imports wait for an export. A sign-in check page left on Google's sign-in (`googleSignIn` said
+   - One hidden-page operation at a time: an export or read doesn't start while an import, another export or read, or
+     the sign-in check runs, and imports wait for both. A sign-in check page left on Google's sign-in (`googleSignIn` said
      `signIn`) closes after 2 minutes unless it was revealed, so it can't block exports.
-   - Lock cancels a running export and drops a list that arrives after it; sign out also cancels every queued and
-     running import (`failed`, `cancelled`).
+   - Lock cancels a running export or read and drops a list that arrives after it; sign out also cancels every queued
+     and running import (`failed`, `cancelled`).
    A refused or failed run keeps the last list (memory, else the encrypted local copy). With "Load passwords when
    used" on and no list in memory, a fill runs a person export.
 10. **Saving to Google.** Google has no API for adding a password, so Ardia uses passwords.google.com's own import,
@@ -344,7 +383,9 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
     packages/ardiacore/tests/fixtures/google-web/server.py <port> <log.jsonl>` serves the options page with Import and
     the delayed Export button and dialog, the password check (fresh `rapt` per accepted check, valid
     `FIXTURE_RAPT_SECONDS`), the import dialog, and a Blob-built CSV that the page also tries to download; rows
-    imported into it show in later exports. One owner-approved
+    imported into it show in later exports. Its `/` is the list page with the real page's row structure (one row per
+    site, `N accounts` when a site has several, rendered 500 ms after load), `password/<id>` redirects to the check, and
+    `POST /forget?site=<host>` deletes a site from the list and later exports. One owner-approved
     override exists for end-to-end runs: `ARDIA_TEST googleChromeAccount=<email>` (background mode only, and like every
     `ARDIA_TEST` value ignored outside a test instance) points the provider at the real Chrome folder but only at the
     profile whose `user_name` is that email (no match is `signedOut`; no other profile is listed or read), reads the
@@ -360,8 +401,12 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
 - A Proton Pass session lock can only be lifted with `pass-cli session unlock` in Terminal.
 - 1Password's list has no one-time code flag, so `hasTotp` is unknown there and `vaults.totp` answers `null` when the
   item has none.
-- Google Password Manager reads the account's passwords as of the last export: at most hourly by itself or on Sync
-  Now, plus the reconcile after a save and Sync Anyway. How long Google honours a `rapt` isn't published;
+- Google Password Manager's passwords are as of the last export: at most hourly by itself or on Full Sync, plus the
+  reconcile after a save, Sync Anyway and fills that need one. A read only sees sites, not usernames (Google keeps
+  those behind its password check), so a new login on a site Ardia already knows shows as a placeholder only when
+  Google shows that site's account count, and a deleted login on a site that still has others stays until the next
+  export. The read follows passwords.google.com's list as measured in November 2026 (`GoogleListSelectors`); a
+  change there fails as `pageChanged`. How long Google honours a `rapt` isn't published;
   Ardia counts one as fresh for an hour and drops it the first time Google asks for the password anyway. Passkeys, notes and Android app logins aren't read. The export flow follows passwords.google.com as measured
   in November 2026; a change fails as `pageChanged` until `GoogleImportSelectors` is updated.
 - On the Chrome source a save still goes through passwords.google.com as Ardia's default profile is signed in. When
@@ -381,7 +426,7 @@ Calls (`call("vaults.<name>", args)`, typed in `packages/ardiacore/src/engine/ap
 | Call | Args | Returns |
 | --- | --- | --- |
 | `providers` | `{}` | `VaultProviderState[]` |
-| `refresh` | `{provider}` | `VaultProviderState` (drops the item cache, keeping pending saves, forces a Bitwarden sync next list) |
+| `refresh` | `{provider, anyway?, download?}` | `VaultProviderState` (drops the item cache, keeping pending saves, forces a Bitwarden sync next list; Google on the web source reads the list instead, `download` exports within the hourly rule and `anyway` exports past it) |
 | `items` | `{provider?}` | `VaultItem[]` (empty for a locked manager; pending saves carry `pending: true`) |
 | `lock`, `signOut`, `cancelSignIn` | `{provider}` | `VaultProviderState` |
 | `configure` | `{provider, server?}` | `VaultProviderState` (`message` says why a change was refused) |

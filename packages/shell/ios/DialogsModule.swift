@@ -13,16 +13,19 @@ public class DialogsModule: Module {
         return
       }
       let alert = DialogsModule.alert(title: options.title, message: options.message)
-      alert.addButton(withTitle: options.confirmTitle)
-      alert.addButton(withTitle: options.cancelTitle)
-      if options.destructive { alert.buttons.first?.hasDestructiveAction = true }
+      let confirmResponse: NSApplication.ModalResponse = options.cancelIsDefault ? .alertSecondButtonReturn : .alertFirstButtonReturn
+      let titles = options.cancelIsDefault ? [options.cancelTitle, options.confirmTitle] : [options.confirmTitle, options.cancelTitle]
+      for title in titles { alert.addButton(withTitle: title) }
+      let confirmButton = options.cancelIsDefault ? alert.buttons.last : alert.buttons.first
+      if options.destructive { confirmButton?.hasDestructiveAction = true }
+      if options.warning, let icon = DialogsModule.warningIcon() { alert.icon = icon }
       if let suppression = options.suppression {
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = suppression
       }
       DialogsModule.present(alert, windowId: options.windowId) { response in
         promise.resolve([
-          "confirmed": response == .alertFirstButtonReturn,
+          "confirmed": response == confirmResponse,
           "suppressed": alert.suppressionButton?.state == .on,
         ])
       }
@@ -64,6 +67,12 @@ public class DialogsModule: Module {
       if let current { panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true) }
       panel.begin { response in promise.resolve(response == .OK ? panel.url?.path : nil) }
     }.runOnQueue(.main)
+  }
+
+  static func warningIcon() -> NSImage? {
+    let configuration = NSImage.SymbolConfiguration(pointSize: 48, weight: .regular)
+      .applying(NSImage.SymbolConfiguration(paletteColors: [.black, .systemYellow]))
+    return NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning")?.withSymbolConfiguration(configuration)
   }
 
   static func alert(title: String, message: String) -> NSAlert {

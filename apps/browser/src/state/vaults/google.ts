@@ -28,8 +28,6 @@ export function updatedLine(refreshedAt: number | undefined, now = Date.now()): 
   return `Updated ${dayFormat.format(then)}`;
 }
 
-export const clockTime = (at: number) => timeFormat.format(new Date(at));
-
 export const GOOGLE_HOLD_LINE = "Google needs you to confirm";
 export const GOOGLE_FAILED_LINE = "Couldn't update";
 

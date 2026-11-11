@@ -4,6 +4,8 @@ export type ConfirmOptions = {
   confirmTitle?: string;
   cancelTitle?: string;
   destructive?: boolean;
+  cancelIsDefault?: boolean;
+  warning?: boolean;
   suppression?: string;
   windowId?: string;
 };

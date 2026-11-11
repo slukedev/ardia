@@ -6,6 +6,8 @@ struct ConfirmOptions: Record {
   @Field var confirmTitle: String = "OK"
   @Field var cancelTitle: String = "Cancel"
   @Field var destructive: Bool = false
+  @Field var cancelIsDefault: Bool = false
+  @Field var warning: Bool = false
   @Field var suppression: String?
   @Field var windowId: String?
 }

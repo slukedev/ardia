@@ -1,3 +1,7 @@
+import csv
+import hashlib
+import html
+import io
 import http.server
 import json
 import os
@@ -14,6 +18,8 @@ Serves the options page on http://127.0.0.1:<port> and the password check on htt
 Start Ardia with ARDIA_TEST googlePasswordsURL=http://127.0.0.1:<port>,googleAccountsURL=http://localhost:<port>.
 FIXTURE_GOOGLE_PASSWORD sets the accepted password (default fixture-google-pass); FIXTURE_RAPT_SECONDS how long a
 check's rapt token is accepted (default 300). Rows imported through the import dialog are added to later exports.
+The list page (/) shows one row per site like passwords.google.com, built from the export's rows, and
+POST /forget?site=<host> deletes that site's rows, as deleting it on passwords.google.com would.
 Every request and page report is appended to the log as JSON lines (imported rows are logged without passwords)."""
 
 if len(sys.argv) != 3 or sys.argv[1] in ("-h", "--help"):
@@ -28,6 +34,7 @@ PASSWORDS = f"http://127.0.0.1:{PORT}"
 ACCOUNTS = f"http://localhost:{PORT}"
 RAPTS = {}
 IMPORTED = []
+FORGOTTEN = set()
 
 EXPORT_CSV = (
     "name,url,username,password,note\n"
@@ -166,6 +173,58 @@ LOGIN = """<!doctype html><title>Fixture login</title>
 <button id="go" type="submit">Sign in</button></form>"""
 
 
+def site_of(url):
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def rows():
+    text = EXPORT_CSV + "".join(IMPORTED)
+    kept = []
+    for row in csv.DictReader(io.StringIO(text)):
+        if urllib.parse.urlparse(row["url"]).scheme in ("http", "https") and site_of(row["url"]) not in FORGOTTEN:
+            kept.append(row)
+    return kept
+
+
+def export_csv():
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=["name", "url", "username", "password", "note"], lineterminator="\n")
+    writer.writeheader()
+    text = EXPORT_CSV + "".join(IMPORTED)
+    for row in csv.DictReader(io.StringIO(text)):
+        if site_of(row["url"]) not in FORGOTTEN:
+            writer.writerow(row)
+    return out.getvalue()
+
+
+def list_page():
+    sites = {}
+    for row in rows():
+        sites.setdefault(site_of(row["url"]), []).append(row)
+    items = []
+    for name in sorted(sites):
+        group = hashlib.sha256(name.encode()).hexdigest()[:44]
+        count = len(sites[name])
+        extra = f'<div class="count">{count} accounts</div>' if count > 1 else ""
+        items.append(
+            f'<li class="K6ZZTd" data-id="{group}" jsname="Sf4MPd"><div jscontroller="FS1FEb">'
+            f'<a href="password/{group}?ep=1" class="RlFDUe"><div class="iAwpk"><div class="eP6Eff"><div class="PLEKud">'
+            f'<img alt="" role="presentation" src="data:,"></div></div><div class="GqRghe"><div class="mMsbvc">'
+            f'<div class="v2z6vb">{html.escape(name)}</div>{extra}</div></div><div class="kvjuQc"><div class="Ivdcjd">'
+            f'<span class="notranslate" aria-hidden="true"><svg width="24" height="24"><path d="M0 0"></path></svg></span></div></div></div></a>'
+            f'</div><hr></li>'
+        )
+    body = "".join(items)
+    return (
+        "<!doctype html><title>Password Manager</title><h1>Password Manager</h1>"
+        '<input type="text" aria-label="Search passwords"><div id="list"></div>'
+        "<script>setTimeout(() => { document.getElementById('list').innerHTML = "
+        + json.dumps('<ul class="u7hyyf">' + body + "</ul>")
+        + "; }, 500);</script>"
+    )
+
+
 def fill(page, subs):
     for k, v in subs.items():
         page = page.replace("@@" + k + "@@", v)
@@ -197,6 +256,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         fresh = fresh_rapt(q)
         log({"get": host + url.path, "query": sorted(q.keys()), "freshRapt": fresh})
         subs = {"accounts": ACCOUNTS, "passwords": PASSWORDS, "fresh": json.dumps(fresh)}
+        if host.startswith("127.0.0.1") and url.path == "/":
+            log({"listed": len(rows())})
+            return self.send(list_page())
+        if host.startswith("127.0.0.1") and url.path.startswith("/password/"):
+            return self.to_challenge(PASSWORDS + url.path)
         if host.startswith("127.0.0.1") and url.path == "/options":
             if q.get("import") == ["1"]:
                 return self.send(fill(IMPORT, subs)) if fresh else self.to_challenge(f"{PASSWORDS}/options?import=1")
@@ -213,11 +277,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if url.path == "/export":
             fresh = fresh_rapt(urllib.parse.parse_qs(url.query))
             log({"export": "served" if fresh else "refused"})
-            return self.send(EXPORT_CSV + "".join(IMPORTED) if fresh else "", 200 if fresh else 403, kind="text/plain; charset=utf-8")
+            return self.send(export_csv() if fresh else "", 200 if fresh else 403, kind="text/plain; charset=utf-8")
         if url.path == "/imported":
             lines = body.decode(errors="replace").splitlines()[1:]
             IMPORTED.extend(line + "\n" for line in lines if line.strip())
             log({"importedRows": len(lines)})
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        if url.path == "/forget":
+            site = (urllib.parse.parse_qs(url.query).get("site") or [""])[0].lower()
+            FORGOTTEN.add(site)
+            log({"forgot": site})
             self.send_response(204)
             self.send_header("Cache-Control", "no-store")
             self.end_headers()

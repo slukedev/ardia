@@ -10,7 +10,7 @@ let package = Package(
       name: "ArdiaVaultsCore",
       path: "ios",
       sources: [
-        "ChromeHandoffRules.swift", "ChromeLogins.swift", "GoogleWebImportRules.swift", "GoogleWebExportRules.swift", "ChromeProfiles.swift", "GoogleSourceRules.swift", "VaultError.swift", "VaultItem.swift", "VaultJSON.swift",
+        "ChromeHandoffRules.swift", "ChromeLogins.swift", "GoogleWebImportRules.swift", "GoogleWebExportRules.swift", "GoogleWebListRules.swift", "ChromeProfiles.swift", "GoogleSourceRules.swift", "VaultError.swift", "VaultItem.swift", "VaultJSON.swift",
         "VaultOriginMatch.swift", "VaultPendingItems.swift", "VaultSyncSchedule.swift",
       ],
       linkerSettings: [.linkedLibrary("sqlite3")]

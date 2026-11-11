@@ -8,7 +8,7 @@ const { startNativeSettings } = await import("../settings/nativeSettings.ts");
 const { vaultSyncSeconds } = await import("./syncInterval.ts");
 const { EVERY_VAULT, syncEveryVault, syncStatusOf, syncVault, useVaultSync } = await import("./sync.ts");
 const store = await import("./store.ts");
-const { syncEveryVaultAsking, syncLimitAlert, syncVaultAsking } = await import("./syncLimit.ts");
+const { FULL_SYNC_TITLE, fullSyncAsking, offersFullSync, syncLimitAlert } = await import("./syncLimit.ts");
 
 const S = () => useBrowser.getState();
 const caps = { totp: true, save: true, selfHosted: true, masterPassword: true, touchID: false };
@@ -141,35 +141,55 @@ async function asked(confirmed, run) {
   return native.dialogFakes.asked.map((a) => a.confirmTitle);
 }
 
-test("Sync Now within the hour asks first, and Cancel leaves Google alone", async () => {
+test("Sync Now reads Google at once, even within the hour, without asking", async () => {
   await setup([google(Date.now() + HOUR / 2)]);
-  assert.deepEqual(await asked(false, () => syncVaultAsking("google")), ["Sync Anyway"]);
-  assert.deepEqual(native.vaultFakes.refreshed, []);
-});
-
-test("Sync Anyway syncs Google past the hour", async () => {
-  await setup([google(Date.now() + HOUR / 2)]);
-  assert.deepEqual(await asked(true, () => syncVaultAsking("google")), ["Sync Anyway"]);
-  assert.deepEqual(native.vaultFakes.refreshed, ["google anyway"]);
-});
-
-test("once the hour is over, Sync Now syncs without asking", async () => {
-  await setup([google(Date.now() - 1)]);
-  assert.deepEqual(await asked(true, () => syncVaultAsking("google")), []);
+  assert.deepEqual(await asked(false, () => syncVault("google")), []);
   assert.deepEqual(native.vaultFakes.refreshed, ["google"]);
 });
 
-test("syncing every manager syncs the others at once and asks only about Google", async () => {
+test("syncing every manager asks about nothing and syncs Google too", async () => {
   await setup([provider("bitwarden", "unlocked"), google(Date.now() + HOUR)]);
-  assert.deepEqual(await asked(false, () => syncEveryVaultAsking()), ["Sync Anyway"]);
-  assert.deepEqual(native.vaultFakes.refreshed, ["bitwarden"]);
+  assert.deepEqual(await asked(false, () => syncEveryVault()), []);
+  assert.deepEqual(native.vaultFakes.refreshed.sort(), ["bitwarden", "google"]);
 });
 
-test("the alert says when Google can sync again and why waiting matters", () => {
-  const at = new Date(2026, 10, 10, 22, 42).getTime();
-  const alert = syncLimitAlert("Google Password Manager", at);
-  assert.equal(alert.title, "Google Password Manager Synced Recently");
-  assert.match(alert.message, /You can sync again at 10:42/);
-  assert.match(alert.message, /at most once an hour/);
-  assert.equal(alert.cancelTitle, "Cancel");
+test("Full Sync within the hour asks first, and Cancel leaves Google alone", async () => {
+  await setup([google(Date.now() + HOUR / 2)]);
+  assert.deepEqual(await asked(false, () => fullSyncAsking("google")), ["Sync Anyway"]);
+  assert.deepEqual(native.vaultFakes.refreshed, []);
+});
+
+test("Sync Anyway runs the full sync past the hour", async () => {
+  await setup([google(Date.now() + HOUR / 2)]);
+  assert.deepEqual(await asked(true, () => fullSyncAsking("google")), ["Sync Anyway"]);
+  assert.deepEqual(native.vaultFakes.refreshed, ["google anyway"]);
+});
+
+test("once the hour is over, Full Sync downloads without asking", async () => {
+  await setup([google(Date.now() - 1)]);
+  assert.deepEqual(await asked(true, () => fullSyncAsking("google")), []);
+  assert.deepEqual(native.vaultFakes.refreshed, ["google download"]);
+});
+
+test("Full Sync is offered only for Google read from passwords.google.com while unlocked", () => {
+  assert.equal(FULL_SYNC_TITLE, "Full Sync");
+  assert.equal(offersFullSync({ state: "unlocked", source: "web" }), true);
+  assert.equal(offersFullSync({ state: "unlocked", source: "chrome" }), false);
+  assert.equal(offersFullSync({ state: "locked", source: "web" }), false);
+});
+
+test("a Sync Now whose read failed shows no Synced", async () => {
+  await setup([{ ...google(undefined), setup: { kind: "chrome" }, message: "Ardia couldn't reach Google. Check your connection." }]);
+  await syncVault("google");
+  assert.equal(useVaultSync.getState().google, undefined);
+});
+
+test("the alert counts the minutes left, warns about being signed out, and defaults to Cancel", () => {
+  const now = Date.now();
+  const alert = syncLimitAlert(now + 22.5 * 60_000, now);
+  assert.equal(alert.title, "Sync Again in 23 Minutes");
+  assert.equal(alert.message, "Frequent syncs can sign you out of Google.");
+  assert.equal(alert.cancelIsDefault, true);
+  assert.equal(alert.warning, true);
+  assert.equal(syncLimitAlert(now + 10_000, now).title, "Sync Again in 1 Minute");
 });

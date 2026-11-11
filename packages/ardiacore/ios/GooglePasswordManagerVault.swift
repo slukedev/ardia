@@ -225,9 +225,7 @@ struct GooglePasswordManagerVault: VaultProvider {
     }
   }
 
-  private func webList(_ cli: VaultCLI) async throws -> VaultItemList {
-    GoogleExportCSV.list(try await webRows(cli, trigger: VaultRefreshReason.current), provider: id)
-  }
+  private func webList(_ cli: VaultCLI) async throws -> VaultItemList { try await webSync(cli) }
 
   private func chromeList(_ cli: VaultCLI) throws -> VaultItemList {
     let (key, context) = try unlocked(cli)
@@ -248,15 +246,7 @@ struct GooglePasswordManagerVault: VaultProvider {
   }
 
   func secret(_ cli: VaultCLI, id itemId: String, field: VaultField) async throws -> String {
-    if Self.usesWeb {
-      guard field != .totp, GoogleExportCSV.isValidId(itemId) else { throw VaultError.notFound }
-      var rows = await GoogleWebImporter.shared.latestRows
-      if rows == nil { rows = try await webRows(cli, trigger: .personAnyway) }
-      guard let row = rows?.first(where: { GoogleExportCSV.itemId(url: $0.url, username: $0.username) == itemId }) else { throw VaultError.notFound }
-      let value = field == .username ? row.username : row.password
-      guard !value.isEmpty else { throw VaultError.notFound }
-      return value
-    }
+    if Self.usesWeb { return try await webSecret(cli, id: itemId, field: field) }
     let key: Data
     let context: Context
     do {
@@ -307,24 +297,6 @@ struct GooglePasswordManagerVault: VaultProvider {
       var entry: [String: Any] = ["directory": profile.directory, "name": profile.name, "selected": profile.directory == chosen?.directory]
       entry["email"] = profile.email ?? NSNull()
       return entry
-    }
-  }
-
-  private func webRows(_ cli: VaultCLI, trigger: GoogleWebTrigger) async throws -> [GoogleExportRow] {
-    guard let password = webPassword(cli) else { throw VaultError.locked }
-    let reply = await GoogleWebImporter.shared.export(trigger: trigger, password: password)
-    switch reply {
-    case .list(let rows):
-      return rows
-    case .failed(.wrongPassword), .failed(.noPassword):
-      throw VaultError.failed(GoogleImportError.wrongPassword.message)
-    default:
-      if let latest = await GoogleWebImporter.shared.latestRows { return latest }
-      switch reply {
-      case .failed(let error), .confirm(_, let error), .refused(.held(let error)): throw VaultError.failed(error.message)
-      case .refused(.busy): throw VaultError.failed("Ardia is already talking to Google. Try again in a moment.")
-      default: throw VaultError.failed("Google Password Manager refreshes at most once an hour.")
-      }
     }
   }
 

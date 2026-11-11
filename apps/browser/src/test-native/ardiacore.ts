@@ -536,7 +536,7 @@ const fakeModules = {
     "vaults",
     {
       providers: () => vaultFakes.providers,
-      refresh: ({ provider, anyway }) => (vaultFakes.refreshed.push(anyway ? `${provider} anyway` : provider), vaultState(provider)),
+      refresh: ({ provider, anyway, download }) => (vaultFakes.refreshed.push([provider, anyway && "anyway", download && "download"].filter(Boolean).join(" ")), vaultState(provider)),
       items: ({ provider }) => vaultFakes.items.filter((i) => (!provider || i.provider === provider) && vaultUnlocked(i.provider)),
       lock: ({ provider }) => setVaultState(provider, "locked"),
       signOut: ({ provider }) => setVaultState(provider, "signedOut"),

@@ -48,6 +48,7 @@ struct GoogleImportSite: Equatable, Sendable {
 
   var importURL: String { passwords + Self.importPath }
   var optionsURL: String { passwords + Self.optionsPath }
+  var listURL: String { passwords + "/" }
   var signInURL: String {
     let next = optionsURL.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? optionsURL
     return accounts + "/ServiceLogin?continue=" + next

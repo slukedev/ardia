@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { refreshVault } from "../../platform/vaults";
+import { isChromeVault, refreshVault, type VaultRefreshFlags } from "../../platform/vaults";
 import { applyProviderState, currentVaultProviders, loadVaultItems, useVaults, vaultProviderOf } from "./store";
 
 export type VaultSyncStatus = "syncing" | "synced";
@@ -42,22 +42,22 @@ export function nativeSyncSettled(provider: string, limit = NATIVE_SYNC_LIMIT_MS
   });
 }
 
-async function syncOne(provider: string, anyway = false) {
+async function syncOne(provider: string, flags: VaultRefreshFlags = {}) {
   try {
-    applyProviderState(await refreshVault(provider, anyway));
+    applyProviderState(await refreshVault(provider, flags));
     await nativeSyncSettled(provider);
     await loadVaultItems(provider, true);
     const state = vaultProviderOf(provider);
-    return state?.state === "unlocked" && !state.hold;
+    return state?.state === "unlocked" && !state.hold && !(isChromeVault(state) && state.message);
   } catch {
     return false;
   }
 }
 
-export async function syncVault(provider: string, { anyway = false } = {}) {
+export async function syncVault(provider: string, flags: VaultRefreshFlags = {}) {
   if (useVaultSync.getState()[provider] === "syncing") return;
   mark(provider, "syncing");
-  mark(provider, (await syncOne(provider, anyway)) ? "synced" : null);
+  mark(provider, (await syncOne(provider, flags)) ? "synced" : null);
 }
 
 export async function syncEveryVault(except: readonly string[] = []) {

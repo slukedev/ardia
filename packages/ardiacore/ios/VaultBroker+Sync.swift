@@ -45,6 +45,11 @@ extension VaultBroker {
     if syncShown.remove(id) != nil { republish(id) }
   }
 
+  func listedItems(_ id: String) -> [VaultItem] {
+    restoreFromDisk(id)
+    return listedItems[id] ?? []
+  }
+
   func republish(_ id: String) {
     guard let state = states[id] else { return }
     _ = publish(state)

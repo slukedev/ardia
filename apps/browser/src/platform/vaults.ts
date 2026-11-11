@@ -5,7 +5,9 @@ export type { VaultItem, VaultProviderState, VaultSignInFields, VaultSignInResul
 export type VaultCopyField = VaultSecretField;
 
 export const vaultProviders = () => call("vaults.providers");
-export const refreshVault = (provider: string, anyway = false) => call("vaults.refresh", anyway ? { provider, anyway } : { provider });
+export type VaultRefreshFlags = { anyway?: boolean; download?: boolean };
+export const refreshVault = (provider: string, { anyway, download }: VaultRefreshFlags = {}) =>
+  call("vaults.refresh", { provider, ...(anyway ? { anyway } : {}), ...(download ? { download } : {}) });
 export const vaultItems = (provider?: string) => call("vaults.items", provider ? { provider } : {});
 export const lockVault = (provider: string) => call("vaults.lock", { provider });
 export const signOutVault = (provider: string) => call("vaults.signOut", { provider });

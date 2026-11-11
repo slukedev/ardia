@@ -83,6 +83,10 @@ final class GoogleWebImporter {
   var rapt: GoogleRapt?
   lazy var limits: GoogleWebLimits = Self.loadLimits()
   var latestRows: [GoogleExportRow]?
+  var freshRows: [GoogleExportRow]?
+  var listing: ListJob?
+  var listLimits = GoogleListLimits()
+  var listFailure: GoogleImportError?
   var signInPage: ArdiaHiddenPage?
   private var signInWatch: Task<Void, Never>?
   private var signInExpiry: Task<Void, Never>?
@@ -169,6 +173,7 @@ final class GoogleWebImporter {
   func dropLatest() {
     generation += 1
     latestRows = nil
+    freshRows = nil
     reconcileTask?.cancel()
     reconcileTask = nil
     if let job = exporting, job.failure == nil { job.failure = .cancelled }
@@ -179,6 +184,8 @@ final class GoogleWebImporter {
     closeSignIn()
     rapt = nil
     limits = GoogleWebLimits()
+    listLimits = GoogleListLimits()
+    listFailure = nil
     saveLimits()
     let dropped = queue
     queue = []
@@ -189,10 +196,15 @@ final class GoogleWebImporter {
     if let job = running, job.failure == nil { job.failure = .cancelled }
   }
 
-  var lastRefresh: Date? { limits.lastSuccess }
+  var lastRefresh: Date? { [limits.lastSuccess, listLimits.lastSuccess].compactMap { $0 }.max() }
 
   var heldBy: GoogleImportError? { limits.held }
-  var failedWith: GoogleImportError? { limits.failures > 0 ? limits.lastError : nil }
+  var failedWith: GoogleImportError? {
+    if let listFailure { return listFailure }
+    guard limits.failures > 0, let error = limits.lastError else { return nil }
+    if let read = listLimits.lastSuccess, let failed = limits.lastFailure, read > failed { return nil }
+    return error
+  }
 
   func personConfirmed() {
     limits.personConfirmed()
@@ -243,7 +255,7 @@ final class GoogleWebImporter {
   }
 
   func pump() {
-    guard running == nil, exporting == nil, !queue.isEmpty else { return }
+    guard running == nil, exporting == nil, listing == nil, !queue.isEmpty else { return }
     let job = queue.removeFirst()
     running = job
     Task {
@@ -372,7 +384,7 @@ final class GoogleWebImporter {
       try? await Task.sleep(nanoseconds: UInt64(max(delay, 1) * 1_000_000_000))
       guard !Task.isCancelled, let self else { return }
       self.reconcileTask = nil
-      guard self.running == nil, self.queue.isEmpty, self.exporting == nil else { return }
+      guard self.running == nil, self.queue.isEmpty, self.exporting == nil, self.listing == nil else { return }
       let retry = await VaultBroker.shared.reconcileGoogle()
       guard let retry, self.reconcileTask == nil, self.reconcileRuns < Self.reconcileRetries else { return }
       self.reconcileRuns += 1
@@ -438,7 +450,7 @@ final class GoogleWebImporter {
     }
   }
 
-  private func evaluate(_ page: ArdiaHiddenPage, _ code: String) async -> String? {
+  func evaluate(_ page: ArdiaHiddenPage, _ code: String) async -> String? {
     let answer = OneAnswer()
     return await withCheckedContinuation { done in
       answer.continuation = done

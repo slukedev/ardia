@@ -78,7 +78,8 @@ public class VaultsModule: Module {
     "refresh": { args, reply in
       let id = try VaultsModule.provider(args)
       let anyway = try args.optionalBool("anyway") ?? false
-      VaultsModule.answer(reply) { await VaultBroker.shared.refresh(id, explicit: true, anyway: anyway)?.jsonObject() }
+      let download = try args.optionalBool("download") ?? false
+      VaultsModule.answer(reply) { await VaultBroker.shared.refresh(id, explicit: true, anyway: anyway, download: download)?.jsonObject() }
     },
     "items": { args, reply in
       let id = try VaultsModule.optionalProvider(args)

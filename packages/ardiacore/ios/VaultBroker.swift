@@ -34,14 +34,17 @@ actor VaultBroker {
     return VaultRegistry.providers.map { states[$0.id] ?? placeholder($0) }
   }
 
-  func refresh(_ id: String, explicit: Bool = false, anyway: Bool = false) async -> VaultProviderState? {
+  func refresh(_ id: String, explicit: Bool = false, anyway: Bool = false, download: Bool = false) async -> VaultProviderState? {
     guard let provider = VaultRegistry.provider(id) else { return nil }
     if explicit {
       sessions.clearScratch(id)
       if id == GooglePasswordManagerVault.providerId, GooglePasswordManagerVault.usesWeb {
-        await GoogleWebImporter.shared.personConfirmed()
+        let exports = anyway || download
+        if exports { await GoogleWebImporter.shared.personConfirmed() }
         if sessions.session(id) != nil {
-          await VaultRefreshReason.$current.withValue(anyway ? .personAnyway : .person) { _ = await fetchItems(provider) }
+          await VaultRefreshReason.$readOnly.withValue(!exports) {
+            await VaultRefreshReason.$current.withValue(anyway ? .personAnyway : .person) { _ = await fetchItems(provider) }
+          }
         }
         return await currentState(provider)
       }
@@ -359,7 +362,8 @@ actor VaultBroker {
     let id = provider.id
     if let inFlight = loading[id] {
       _ = try? await inFlight.value
-      return cachedItems[id] ?? []
+      let exportWanted = id == GooglePasswordManagerVault.providerId && VaultRefreshReason.current.byPerson && !VaultRefreshReason.readOnly
+      if !exportWanted || loading[id] != nil { return cachedItems[id] ?? [] }
     }
     guard let cli = VaultCLI.make(for: provider, sessions: sessions) else { return [] }
     let queue = lane(id)
@@ -503,6 +507,7 @@ actor VaultBroker {
     switch error as? VaultError {
     case .locked?, .signedOut?: return .locked
     case .notFound?: return .notFound
+    case .notDownloaded?: return .notDownloaded
     default: return .failed
     }
   }

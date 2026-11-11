@@ -5,10 +5,10 @@ extension GoogleWebImporter {
     if let job = exporting, trigger.byPerson, let person = job.person { return .confirm(id: job.id, error: person) }
     if trigger.byPerson {
       let deadline = Date().addingTimeInterval(Self.personWaitForImports)
-      while running != nil || !queue.isEmpty, Date() < deadline { try? await Task.sleep(nanoseconds: Self.pollInterval) }
+      while running != nil || !queue.isEmpty || listing != nil, Date() < deadline { try? await Task.sleep(nanoseconds: Self.pollInterval) }
     }
     let now = Date()
-    let admission = limits.admission(trigger, now: now, busy: running != nil || exporting != nil || signInPage != nil, raptSeen: rapt?.seen)
+    let admission = limits.admission(trigger, now: now, busy: running != nil || exporting != nil || listing != nil || signInPage != nil, raptSeen: rapt?.seen)
     guard admission.verdict == .go else {
       if trigger != .use { NSLog("[vaults] google export refused (%@): %@", trigger.rawValue, String(describing: admission.verdict)) }
       return .refused(admission.verdict)
@@ -120,8 +120,10 @@ extension GoogleWebImporter {
     switch reply {
     case .list(let rows):
       limits.succeeded(now)
+      listFailure = nil
       if job.generation == generation {
         latestRows = rows
+        freshRows = rows
         NSLog("[vaults] google export read %d row(s)", rows.count)
       } else {
         NSLog("[vaults] google export finished after a lock; its list was dropped")

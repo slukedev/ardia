@@ -59,9 +59,33 @@ enum GoogleImportScripts {
     """
   }
 
-  private static func json<T: Encodable>(_ value: T) -> String {
+  static func json<T: Encodable>(_ value: T) -> String {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     return (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+  }
+}
+
+enum GoogleListScripts {
+  static func snapshot(_ selectors: GoogleListSelectors = .current, page: GoogleImportSelectors = .current) -> String {
+    """
+    const s = \(GoogleImportScripts.json(selectors));
+    const p = \(GoogleImportScripts.json(page));
+    const visible = (el) => !!el && el.isConnected && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden" && !el.closest('[aria-hidden="true"]');
+    const all = (q, root) => Array.from((root || document).querySelectorAll(q));
+    const leaves = (link) => all("*", link).filter((el) => !el.children.length && !el.closest("svg") && el.tagName !== "IMG").map((el) => el.textContent || "");
+    const rows = all(s.rows).map((row) => row.querySelector(s.rowLinks)).filter(Boolean).map((link) => ({ lines: leaves(link) }));
+    const scroller = document.scrollingElement;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    post("result", JSON.stringify({
+      url: location.href,
+      ready: document.readyState !== "loading",
+      rows,
+      searchField: all(s.searchFields).some(visible),
+      passwordField: all(p.passwordFields).some(visible),
+      captcha: all(p.captchaFrames).some(visible),
+      text: (document.body ? document.body.innerText : "").slice(0, 6000),
+    }));
+    """
   }
 }

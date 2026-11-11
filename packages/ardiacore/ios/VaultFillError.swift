@@ -3,6 +3,7 @@ enum VaultFillError: String, Error, Sendable {
   case originMismatch
   case insecure
   case notFound
+  case notDownloaded
   case failed
   case notAuthorized
 }

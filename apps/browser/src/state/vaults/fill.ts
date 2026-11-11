@@ -22,6 +22,8 @@ export function fillErrorText(error: VaultFillError | string, provider: string):
       return "This page isn't secure, so nothing was filled.";
     case "notFound":
       return `This login is no longer in ${managerName(provider)}.`;
+    case "notDownloaded":
+      return `${managerName(provider)} hasn't downloaded this password yet. Try again in a minute.`;
     default:
       return "Couldn't fill this login. Try again.";
   }
