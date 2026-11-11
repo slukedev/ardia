@@ -20,7 +20,7 @@ import type { ClearSiteDataResult, SiteSettings, SiteSettingType, SiteSettingVal
 import type { LinkRoute, TabStripCommand, TabStripTransaction } from "../tabs";
 import type { PageCookie, PageEngine, PasskeyAccess } from "../webkit";
 import type { DisplayMediaSource } from "../pageTypes";
-import type { VaultChromeProfile, VaultGoogleAccount, VaultGoogleExport, VaultGoogleImport, VaultGoogleSignIn, VaultItem, VaultProviderId, VaultProviderState, VaultSecretField, VaultTotp } from "../vaults";
+import type { VaultChromeProfile, VaultGoogleAccount, VaultGoogleExport, VaultGoogleImport, VaultGoogleSignIn, VaultGoogleSourceChoice, VaultItem, VaultProviderId, VaultProviderState, VaultSecretField, VaultTotp } from "../vaults";
 
 type Profile = { profile: string };
 type Done = Record<string, never> | null;
@@ -203,6 +203,7 @@ export type EngineCalls = {
   "vaults.biometrics": [{}, { available: boolean }];
   "vaults.googleProfiles": [{}, VaultChromeProfile[]];
   "vaults.googleAccount": [{}, VaultGoogleAccount];
+  "vaults.googleSource": [{ choice: VaultGoogleSourceChoice }, VaultProviderState];
   "vaults.forgetGooglePassword": [{}, VaultGoogleAccount];
   "vaults.googleSignIn": [{}, { state: VaultGoogleSignIn }];
   "vaults.googleReveal": [{ id?: string }, { revealed: boolean }];

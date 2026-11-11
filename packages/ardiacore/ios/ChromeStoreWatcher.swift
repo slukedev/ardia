@@ -41,7 +41,7 @@ actor ChromeStoreWatcher {
 
   private func check(_ id: String) {
     guard let handoff = pending[id], let files = stores[id] else { return }
-    let key = VaultSessionStore.shared.session(GooglePasswordManagerVault.providerId).flatMap(ChromeCrypto.key(hex:))
+    let key = VaultSessionStore.shared.session(GooglePasswordManagerVault.providerId).flatMap(GoogleSession.init)?.chromeKey.flatMap(ChromeCrypto.key(hex:))
     let modified = files.compactMap(ChromeLoginReader.modified).max()
     let step = ChromeHandoffRules.step(handoff, now: Date(), modified: modified, key: key) {
       var rows: [ChromeLogin] = []

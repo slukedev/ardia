@@ -1,4 +1,4 @@
-import { call, on, saveGooglePassword, signInToVault, type VaultGoogleAccount, type VaultGoogleExport, type VaultGoogleImport, type VaultGoogleSignIn, type VaultSaveResult, unlockVault as unlockNativeVault, type VaultItem, type VaultProviderState, type VaultSecretField, type VaultSignInFields, type VaultSignInResult, type VaultTotp } from "@ardia/ardiacore";
+import { call, on, saveGooglePassword, signInToVault, type VaultGoogleAccount, type VaultGoogleExport, type VaultGoogleImport, type VaultGoogleSignIn, type VaultGoogleSourceChoice, type VaultSaveResult, unlockVault as unlockNativeVault, type VaultItem, type VaultProviderState, type VaultSecretField, type VaultSignInFields, type VaultSignInResult, type VaultTotp } from "@ardia/ardiacore";
 
 export type { VaultItem, VaultProviderState, VaultSignInFields, VaultSignInResult, VaultTotp };
 
@@ -27,13 +27,14 @@ export const onVaultItemsChanged = (listener: (provider: string) => void) => on(
 export type { VaultField, VaultFieldKind, VaultFieldRect, VaultFillError, VaultFillField, VaultKeyPress, VaultSubmission } from "@ardia/ardiacore";
 
 export type ChromeProfile = { directory: string; name: string; email: string | null; selected?: boolean };
-export type { VaultGoogleAccount, VaultGoogleExport, VaultGoogleImport, VaultGoogleSignIn };
+export type { VaultGoogleAccount, VaultGoogleExport, VaultGoogleImport, VaultGoogleSignIn, VaultGoogleSourceChoice };
 export type VaultSaveOutcome = { kind: "saved"; importId?: string } | { kind: "confirm"; importId: string; error: string } | { kind: "failed"; error: string; action?: "updatePassword" };
 
 export const isChromeVault = (p: Pick<VaultProviderState, "setup">) => p.setup?.kind === "chrome";
 
 export const chromeProfiles = () => call("vaults.googleProfiles", {});
 export const googleAccount = () => call("vaults.googleAccount", {});
+export const setGoogleSource = (choice: VaultGoogleSourceChoice) => call("vaults.googleSource", { choice });
 export const forgetGooglePassword = () => call("vaults.forgetGooglePassword", {});
 export const checkGoogleSignIn = () => call("vaults.googleSignIn", {}).then((r) => r.state);
 export const revealGooglePage = (id?: string) => call("vaults.googleReveal", id ? { id } : {}).then((r) => r.revealed);

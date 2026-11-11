@@ -554,6 +554,11 @@ const fakeModules = {
       cancelSignIn: ({ provider }) => vaultState(provider),
       googleProfiles: () => vaultFakes.chromeProfiles,
       googleAccount: () => vaultFakes.googleAccount,
+      googleSource: ({ choice }) => {
+        const current = vaultState("google");
+        Object.assign(current, { sourceChoice: choice, state: current.state === "unlocked" && choice !== current.sourceChoice ? "locked" : current.state });
+        return current;
+      },
       forgetGooglePassword: () => (vaultFakes.googleAccount = { email: null, hasPassword: false }),
       googleSignIn: () => ({ state: vaultFakes.googleSignIn }),
       googleReveal: ({ id }) => (vaultFakes.reveals.push(id ?? null), { revealed: true }),

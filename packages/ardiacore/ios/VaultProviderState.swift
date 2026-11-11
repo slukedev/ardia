@@ -16,6 +16,9 @@ struct VaultProviderState: Codable, Equatable, Sendable {
   var syncAgainAt: Double? = nil
   var hold: String? = nil
   var syncing = false
+  var source: String? = nil
+  var sourceChoice: String? = nil
+  var fallback: String? = nil
 
   func jsonObject() -> [String: Any] { VaultJSON.object(self) }
 }

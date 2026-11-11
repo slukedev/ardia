@@ -5,7 +5,8 @@ import { useSettings } from "../../../state/browser/hooks";
 import { updateSettings } from "../../../state/settings/actions";
 import { VAULT_LOCK_MINUTES } from "../../../state/settings/settings";
 import { lockProvider, refreshProvider, reloadProviders, signInError, signOutProvider, unlockProvider, type VaultProviderState } from "../../../state/vaults/actions";
-import { chromeStatusLine, googleUpdateFailed, forgetGoogleAccountPassword, isChromeVault, loadGoogleAccount, useGoogleAccount } from "../../../state/vaults/google";
+import { googleUpdateFailed, forgetGoogleAccountPassword, isChromeVault, loadGoogleAccount, useGoogleAccount } from "../../../state/vaults/google";
+import { chooseGoogleSource, googleSourceMenu, googleStatusLine, sourceChoiceOf } from "../../../state/vaults/googleSource";
 import { useVaultProviders, useVaultsLoaded, useVaultSyncStatus, useVaultUnlocking } from "../../../state/vaults/hooks";
 import { syncVault } from "../../../state/vaults/sync";
 import { syncVaultAsking } from "../../../state/vaults/syncLimit";
@@ -34,7 +35,7 @@ function useMinuteTick(on: boolean) {
 }
 
 function stateLine(p: VaultProviderState, now: number): string | undefined {
-  if (isChromeVault(p)) return chromeStatusLine(p, now);
+  if (isChromeVault(p)) return googleStatusLine(p, now);
   const account = [p.account, p.server && p.capabilities.selfHosted ? p.server.replace(/^https?:\/\//, "") : null].filter(Boolean).join(" · ");
   const status = p.state === "locked" ? "Locked" : p.state === "notInstalled" ? "Not installed" : p.state === "unavailable" ? p.message || "Not available" : p.state === "signedOut" ? "Not connected" : "";
   return [account, status].filter(Boolean).join(" · ") || undefined;
@@ -66,6 +67,7 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
       ...(chrome
         ? [
             { separator: true as const },
+            googleSourceMenu(provider),
             { id: "googlePassword", title: googlePassword ? "Update Google Password…" : "Save Google Password…", symbol: "key" },
             ...(googlePassword ? [{ id: "forgetGooglePassword", title: "Forget Google Password", symbol: "trash" }] : []),
           ]
@@ -73,6 +75,8 @@ function ProviderRow({ provider }: { provider: VaultProviderState }) {
       { separator: true },
       { id: "signOut", title: leave.menu, symbol: "rectangle.portrait.and.arrow.right" },
     ]);
+    const source = sourceChoiceOf(choice);
+    if (source) return void chooseGoogleSource(provider, source);
     if (choice === "googlePassword") return showGoogleSaveSheet(provider.id);
     if (choice === "forgetGooglePassword") return void forgetGoogleAccountPassword();
     if (choice === "lock") await lockProvider(provider.id);

@@ -38,9 +38,11 @@ enum GoogleAccountPassword {
     return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
   }
 
-  static func read() async -> Result<(email: String, password: String), GoogleImportError> {
+  static func read(ownerConfirmed: Bool = false) async -> Result<(email: String, password: String), GoogleImportError> {
     guard let email = email() else { return .failure(.noPassword) }
-    guard await VaultOwnerCheck.confirm(reason) else { return .failure(.notAllowed) }
+    if !ownerConfirmed {
+      guard await VaultOwnerCheck.confirm(reason) else { return .failure(.notAllowed) }
+    }
     if let file = sandboxFile {
       guard let password = locked({ load(file)[email] }) else { return .failure(.noPassword) }
       return .success((email, password))

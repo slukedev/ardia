@@ -25,7 +25,13 @@ export type VaultProviderState = {
   syncAgainAt?: number;
   hold?: string;
   syncing?: boolean;
+  source?: VaultGoogleSource;
+  sourceChoice?: VaultGoogleSourceChoice;
+  fallback?: string;
 };
+
+export type VaultGoogleSource = "chrome" | "web";
+export type VaultGoogleSourceChoice = "automatic" | VaultGoogleSource;
 
 export type VaultItem = {
   provider: VaultProviderId;

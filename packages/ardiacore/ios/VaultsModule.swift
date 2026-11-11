@@ -114,6 +114,10 @@ public class VaultsModule: Module {
     },
     "googleProfiles": { _, reply in reply.ok(GooglePasswordManagerVault.profileList(VaultSessionStore.shared)) },
     "googleAccount": { _, reply in reply.ok(VaultsModule.googleAccount()) },
+    "googleSource": { args, reply in
+      let choice: GoogleSourceChoice = try args.choice("choice")
+      VaultsModule.answer(reply) { await VaultBroker.shared.setGoogleSource(choice)?.jsonObject() }
+    },
     "forgetGooglePassword": { _, reply in
       GoogleAccountPassword.forget()
       reply.ok(VaultsModule.googleAccount())

@@ -3,12 +3,46 @@
 Ardia fills logins from 1Password, Bitwarden (bitwarden.com, bitwarden.eu, self-hosted servers and Vaultwarden),
 Proton Pass and Google Password Manager. It talks to the first three through the vendor's own command-line tool (`op`,
 `bw`, `pass-cli`), so Ardia never implements a vault format and never syncs a vault. Google has no CLI or API, so
-Google Password Manager goes through passwords.google.com itself, in a page Ardia never shows: reading is the site's own
-CSV export, caught in memory, and saving is its CSV import. Neither needs Chrome. Without a Google password saved in
-Ardia, the provider still falls back to what Google Chrome keeps on this Mac (the signed-in profile's synced
-`Login Data For Account` and on-device `Login Data`, opened with Chrome's Safe Storage key; that path needs Full Disk
-Access, and a Chrome folder macOS won't open counts as `signedOut`, so the row offers Connect…), but nothing in setup
-asks for Chrome or Full Disk Access any more.
+Google Password Manager has two sources. When Google Chrome is installed with a profile signed in to a Google Account
+(its `Login Data For Account` exists), Ardia reads Chrome's own stores, opened with Chrome's Safe Storage key: the
+account store first, then the on-device `Login Data`, live and with no rate limit. Otherwise, or when Chrome can't be
+read, it goes through passwords.google.com in a page Ardia never shows: reading is the site's own CSV export, caught
+in memory. Saving is always the site's CSV import, and on the Chrome source the saved login shows up in Chrome's
+account store once it syncs down. See "Choosing the source" below.
+
+### Choosing the source
+
+`GoogleSourceRules` (pure, `swift test`) picks it from the person's choice, what Chrome looks like
+(`ChromeReadiness`: `notInstalled`, `unreadable` when macOS won't open Chrome's folder, `noProfile`, `deviceOnly` for
+a profile with no Google Account, `account`), the Chrome failure seen this launch (`ChromeFailure`) and whether the
+web path is set up (a Google password saved in Ardia):
+
+| Choice (⋯ › Passwords From) | Picks |
+| --- | --- |
+| Automatic (default, `vaults.googleSource {choice: "automatic"}`) | Chrome when its profile has the account store and nothing failed; else the web when it is set up; else Chrome's on-device logins; else nothing (`signedOut`) |
+| Google Chrome | Chrome (account or on-device) or nothing, never the web |
+| passwords.google.com | the web or nothing |
+
+A Chrome failure (keychain denied or missing, a key that opens no row, macOS refusing the folder, Chrome signed out
+mid-session, or an empty account store while the web is set up, which means Chrome isn't saving passwords to the
+account) is kept in memory until the next launch, a sign out or another choice, so Automatic moves to the web without
+asking again. It happens inside the same unlock or list: an unlock that fails on Chrome goes on to the web unlock, and
+a list that fails on Chrome reads the web when the session holds the Google password. Picking Automatic again from
+the menu, or an unlock with no source left, clears it and tries Chrome again. A busy Chrome store (still busy after
+the retry) is not a failure: the list stays as it was and the error shows.
+
+The state says which source is in use: `source` (`chrome` or `web`), `sourceChoice`, and `fallback`, Chrome's
+problem in one sentence while Automatic is on the web because of it. The Settings row reads `me@gmail.com · Google
+Chrome` on Chrome and `me@gmail.com · Couldn't read Chrome · Updated at 9:05` after a fallback; the reason is the
+last, disabled line of ⋯ › Passwords From. Chrome never sets `syncAgainAt` or `hold`, so the hourly sync alert and
+Confirm… never show there. Changing the choice keeps the session when it already holds what the new source needs and
+refetches; otherwise it locks and Settings unlocks again at once.
+
+The session (`GoogleSession`) is `web:<password>` on the web, the hex Chrome key on Chrome, and
+`chrome:<key>;web:<password>` when a Chrome unlock that passed the owner check (Touch ID copy, or Safe Storage read
+without macOS asking) also reads the saved Google password with that same check. Only the Chrome key goes to the
+Touch ID copy. When macOS's keychain prompt was the approval, the Google password isn't read then, and a save reads it
+after its own owner check if Google asks.
 
 ## Architecture
 
@@ -65,7 +99,7 @@ own gate on top of the CLI: a manager is unlocked only while the session store h
   `unlocked`. `account` is the Google email; `refreshedAt` (ms) is the last successful export and `hold` the error
   code that stopped automatic refreshes, with its line in `message`. Lock forgets the session and the list in memory;
   sign out forgets the Google password, the kept `rapt`, the limits and the local copy.
-- Google Password Manager, Chrome fallback (no Google password saved): `signedOut` when the chosen Chrome profile has no Google account (`user_name`
+- Google Password Manager, Chrome source: `signedOut` when the chosen Chrome profile has no Google account (`user_name`
   in `Local State`) and no on-device `Login Data`, or has neither login store (a profile without an account still
   fills its on-device logins, with no `account`); otherwise `locked` until the session holds the AES key derived from
   Chrome's Safe Storage secret, then `unlocked`. `account` is the profile's Google email and `server` its Chrome name.
@@ -93,8 +127,9 @@ A save never waits for the manager's list. The saved login goes straight into th
   saved) it answers `{saved: true, item, importId}` and the import runs in the background, using the Google password
   the unlock already read (no second owner check). Its end still comes as `vaults.googleImport` with that id; a
   `failed` end (cancelled included) removes the pending item, and the page keeps the captured login again so the offer
-  can retry. Google, Chrome fallback: the save waits as before and, once saved, inserts the pending item until Chrome's
-  account store has it.
+  can retry. Google, Chrome source: the same instant pending item and background import (with the Google password
+  when the session holds it); once the import is saved, `ChromeStoreWatcher` polls Chrome's account store and the
+  pending item is reconciled the moment the login syncs down, with no export.
 - A pending item stops being pending when a fresh list has the same id, or a login with the same host (ignoring case
   and `www.`) and username (ignoring case) whose password is the saved one; the listed item then replaces it, and
   keeps the saved password if the list has none. Until then it hides a listed login with the same host and username
@@ -273,7 +308,7 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
    Verification, captcha) answer the save `code: "confirm"` with an `importId`; the offer says "Google needs you to
    confirm" with Confirm…, which calls `vaults.googleReveal {id}` and shows the same page in a sheet. The import keeps
    running (5 minutes from then), and its end comes as `vaults.googleImport` `saved` or `failed`. Cancel in the sheet
-   cancels the import. With the Chrome fallback, after a save the store watcher polls Chrome's account store (every 2 s,
+   cancels the import. With the Chrome source, after a save the store watcher polls Chrome's account store (every 2 s,
    10 minutes) and refetches the list when the login syncs down; with the web provider the reconcile export above does
    that.
    Error codes, each with one line: `noPassword`, `wrongPassword` (both offer Update Password…), `signIn`, `twoStep`,
@@ -329,6 +364,9 @@ otherwise `locked`) and starts one background refresh, which emits `vaults.chang
   Now, plus the reconcile after a save and Sync Anyway. How long Google honours a `rapt` isn't published;
   Ardia counts one as fresh for an hour and drops it the first time Google asks for the password anyway. Passkeys, notes and Android app logins aren't read. The export flow follows passwords.google.com as measured
   in November 2026; a change fails as `pageChanged` until `GoogleImportSelectors` is updated.
+- On the Chrome source a save still goes through passwords.google.com as Ardia's default profile is signed in. When
+  that is a different Google Account from Chrome's profile, the login lands in that other account, Chrome's store
+  never gets it, and the pending item is dropped after 24 hours.
 - Saving to Google needs Google signed in inside Ardia's default profile and the Google password saved in Ardia; a
   Google Account with on-device encryption, or one that asks for 2-Step Verification on every import, needs the person
   each time. The flow follows passwords.google.com's page as measured in November 2026; a change there fails as
@@ -352,6 +390,7 @@ Calls (`call("vaults.<name>", args)`, typed in `packages/ardiacore/src/engine/ap
 | `generate` | `{}` | `{length}` |
 | `googleProfiles` | `{}` | `{directory, name, email \| null, selected}[]` (Chrome profiles with a folder on disk) |
 | `googleAccount` | `{}` | `{email \| null, hasPassword}` (no owner check: the password isn't read) |
+| `googleSource` | `{choice: "automatic" \| "chrome" \| "web"}` | `VaultProviderState` (locked when the session can't serve the new source) |
 | `forgetGooglePassword` | `{}` | `{email, hasPassword}` |
 | `googleSignIn` | `{}` | `{state: "signedIn" \| "signIn" \| "insecureBrowser" \| "network" \| "unavailable"}` |
 | `googleReveal` | `{id?}` | `{revealed}` (the import's page, or Google's sign-in page without an id) |
@@ -372,11 +411,11 @@ Secret functions (`packages/ardiacore/src/vaults.ts`): `signInToVault(provider, 
 for Proton Pass.
 
 `unlockVault("google", null)` and `signInToVault("google", {})` read the saved Google password after the owner check
-(the Chrome fallback reads Chrome's key instead); the setup kind is `chrome` and the row's Connect… opens the Google
+(the Chrome source reads Chrome's key instead); the setup kind is `chrome` and the row's Connect… opens the Google
 sheet (sign in to Google in Ardia, then the Google password; Connect saves it and unlocks). A save to Google with the Google
 password saved answers at once `{saved: true, item, importId}` with `item.pending: true`; the import's `confirm`,
 `saved` or `failed` follows as `vaults.googleImport` with `id = importId` (a `failed` `wrongPassword` or `noPassword`
-means Update Password…). A save that fails its immediate checks, or a Chrome-fallback save, answers as before:
+means Update Password…). A save that fails its immediate checks answers as before:
 `{saved: true, item}`, `{saved: false, code: "confirm", importId, reason, error}` while Google needs the person, or
 `{saved: false, code, error, action?}` with one of the error codes above (`action: "updatePassword"` for `noPassword`
 and `wrongPassword`). A CLI manager's save answers `{saved: true, item}` with `item.pending: true`.

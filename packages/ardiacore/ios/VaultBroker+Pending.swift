@@ -12,44 +12,24 @@ extension VaultBroker {
     let host = VaultOriginMatch.host(of: origin) ?? origin
     let login = VaultNewLogin(title: named.isEmpty ? (host.hasPrefix("www.") ? String(host.dropFirst(4)) : host) : named, username: username, password: password, url: origin)
     sessions.touch(provider.id)
-    guard GooglePasswordManagerVault.usesWeb else { return await saveToGoogleAndWait(provider, cli: cli, login: login) }
+    let chrome = GooglePasswordManagerVault.plan().source == .chrome
     let accountPassword = GooglePasswordManagerVault.webPassword(session: session)
     let importId = await GoogleWebImporter.shared.enqueue(
       url: login.url, username: login.username, password: login.password, title: login.title, accountPassword: accountPassword)
     let item = insertPending(provider.id, item: provider.savedItem(login), password: login.password)
     let token = beginSync(provider.id)
-    Task { await self.followImport(importId, itemId: item.id, token: token) }
+    Task { await self.followImport(importId, itemId: item.id, token: token, watching: chrome ? (provider, cli, login) : nil) }
     return ["saved": true, "item": item.jsonObject(), "importId": importId]
   }
 
-  func saveToGoogleAndWait(_ provider: GooglePasswordManagerVault, cli: VaultCLI, login: VaultNewLogin) async -> [String: Any] {
-    let token = beginSync(provider.id)
-    defer { endSync(provider.id, token) }
-    let reply = await GoogleWebImporter.shared.save(url: login.url, username: login.username, password: login.password, title: login.title)
-    switch reply {
-    case .saved:
-      let item = insertPending(provider.id, item: provider.savedItem(login), password: login.password)
-      await provider.watchForSync(cli, login: login)
-      return ["saved": true, "item": item.jsonObject()]
-    case .confirm(let id, let error):
-      Task {
-        guard await GoogleWebImporter.shared.outcome(id), self.sessions.session(provider.id) != nil else { return }
-        _ = self.insertPending(provider.id, item: provider.savedItem(login), password: login.password)
-        await provider.watchForSync(cli, login: login)
-      }
-      return ["saved": false, "code": "confirm", "importId": id, "reason": error.rawValue, "error": error.message]
-    case .failed(let error):
-      var answer: [String: Any] = ["saved": false, "code": error.rawValue, "error": error.message]
-      if let action = error.action { answer["action"] = action }
-      return answer
-    }
-  }
-
-  func followImport(_ importId: String, itemId: String, token: UUID) async {
+  func followImport(_ importId: String, itemId: String, token: UUID, watching: (GooglePasswordManagerVault, VaultCLI, VaultNewLogin)? = nil) async {
     let id = GooglePasswordManagerVault.providerId
     let reply = await GoogleWebImporter.shared.finalReply(importId)
     endSync(id, token)
-    if case .saved = reply { return }
+    if case .saved = reply {
+      if let (provider, cli, login) = watching { await provider.watchForSync(cli, login: login) }
+      return
+    }
     discardPending(id, itemId: itemId)
   }
 
