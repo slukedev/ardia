@@ -97,9 +97,9 @@ struct WebKitPageEngine: PageEngine {
     hub.clearSiteData(profile: profile, host: host) { done($0, nil) }
   }
 
-  func prepareTransfer(_ key: String) { hub.transfers.prepare(key) }
+  func prepareTransfer(_ key: String) { if WebKitHub.started { hub.transfers.prepare(key) } }
 
-  func releaseTransfer(_ key: String) { hub.transfers.release(key) }
+  func releaseTransfer(_ key: String) { if WebKitHub.started { hub.transfers.release(key) } }
 
   func clearBrowsingData(profile: String, types: [String], since: Double, done: @escaping () -> Void) {
     hub.clearBrowsingData(profile: profile, types: types, since: since, completion: done)
