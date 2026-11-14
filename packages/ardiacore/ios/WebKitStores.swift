@@ -79,6 +79,7 @@ final class WebKitStores {
     if let store = persistent[profile] ?? deletedProfiles[profile] { return store }
     let store = WKWebsiteDataStore(forIdentifier: Self.storeIdentifier(profile))
     persistent[profile] = store
+    WebKitHub.shared.notifications.attachWorkers(to: store, profile: profile)
     return store
   }
 

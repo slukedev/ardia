@@ -23,6 +23,8 @@ const TOP = [
   ["tint", ["appearance.glassTintAmount", "appearance.glassTintWithTheme"]],
   ["default browser", ["general.defaultBrowser"]],
   ["search engine", ["search.defaultEngine"]],
+  ["webkit only", ["engines.mode"]],
+  ["chromium only", ["engines.mode"]],
   ["ad block", ["privacy.blockAds"]],
   ["adblock", ["privacy.blockAds"]],
   ["block ads", ["privacy.blockAds"]],
@@ -271,6 +273,11 @@ test("a row its pane doesn't draw is left out of search, by the same rule the pa
   assert.deepEqual([...classic], ["tabs.dragToGroupInTopStrip", "appearance.glassTintWithTheme", "appearance.glassTintAmount"]);
   assert.ok(unshown({ memorySaver: false }, { top: false }).has("advanced.memorySaverMode"));
   assert.ok(unshown({ pageEngine: "webkit" }, { top: false }).has("engines.protectedVideo"));
+  const chromiumOnly = unshown({ engineMode: "chromium" }, { top: false });
+  for (const id of ["engines.defaultEngine", "engines.protectedVideo", "engines.websiteRules", "engines.separateData", "engines.chromiumOnly", "engines.passkeys"]) assert.ok(chromiumOnly.has(id), id);
+  const webkitOnly = unshown({ engineMode: "webkit" }, { top: false });
+  for (const id of ["engines.defaultEngine", "engines.websiteRules", "advanced.widevine"]) assert.ok(webkitOnly.has(id), id);
+  for (const id of ["engines.mode", "engines.passkeys", "engines.chromiumOnly"]) assert.ok(!webkitOnly.has(id), id);
   const borderless = unshown({ borderlessMode: true }, { top: false });
   assert.ok(borderless.has("appearance.pageFrame"));
   assert.ok(!borderless.has("appearance.borderlessMode"));

@@ -1,6 +1,17 @@
 import { listExtensions, onExtensionsChanged, type InstalledExtension } from "../../platform/extensions";
-import { onWebKitCount, syncWebKitExtensions, type WebKitExtension } from "../../platform/webkit";
+import {
+  onWebKitCount,
+  onWebKitExtensionCall,
+  onWebKitExtensionListeners,
+  onWebKitExtensionsWanted,
+  replyToWebKitExtension,
+  syncWebKitExtensions,
+  type WebKitExtension,
+  type WebKitExtensionCall,
+} from "../../platform/webkit";
 import { noteWebKitCount, noteWebKitExtensions } from "../telemetry/engineSwitchCounts";
+import { answerExtensionCall } from "./webKitExtensionApis";
+import { noteExtensionListeners } from "./webKitExtensionEvents";
 
 const signatures = new Map<string, string>();
 const running = new Map<string, Promise<void>>();
@@ -48,6 +59,11 @@ export function syncExtensionsToWebKit(profile: string): Promise<void> {
   return run;
 }
 
+export async function answerWebKitExtension(call: WebKitExtensionCall) {
+  const reply = await answerExtensionCall(call);
+  await replyToWebKitExtension(call.id, reply).catch(() => {});
+}
+
 function listen() {
   if (listening) return;
   listening = true;
@@ -55,4 +71,12 @@ function listen() {
     if (signatures.has(profile)) void syncExtensionsToWebKit(profile);
   });
   onWebKitCount(({ name }) => noteWebKitCount(name));
+  onWebKitExtensionCall((call) => void answerWebKitExtension(call));
+  onWebKitExtensionListeners(noteExtensionListeners);
+  onWebKitExtensionsWanted(({ profile }) => {
+    signatures.delete(profile);
+    void syncExtensionsToWebKit(profile);
+  });
 }
+
+listen();

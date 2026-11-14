@@ -5,19 +5,26 @@ import {
   type PasskeyAccess,
   type PasskeyAccessStatus,
 } from "../../../state/engines/passkeys";
-import { type PageEngine, defaultEngine, ENGINE_NAMES, RECOMMENDED_ENGINE, siteOf } from "../../../state/engines/engines";
+import { type EngineMode, type PageEngine, defaultEngine, ENGINE_NAMES, RECOMMENDED_ENGINE, siteOf } from "../../../state/engines/engines";
 import { resolveInput } from "@ardia/core";
 import { useEffect, useState } from "react";
 import { AppState, Linking, View } from "react-native";
-import { setWebsiteEngine } from "../../../state/engines/actions";
+import { setEngineMode, setWebsiteEngine } from "../../../state/engines/actions";
+import { useEngineMode } from "../../../state/engines/hooks";
 import { useSettings } from "../../../state/browser/hooks";
 import { updateSettings } from "../../../state/settings/actions";
-import { Button, DialogActions, DialogTitle, PopUp, Sheet, space, Text, TextField, Toggle } from "../../ui";
+import { Button, DialogActions, DialogTitle, PopUp, Segmented, Sheet, space, Text, TextField, Toggle, type SegmentOption } from "../../ui";
 import { Favicon } from "../../favicon/Favicon";
 import { FormField, Group, Row, SectionHeader } from "../Form";
 import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
 
 const ENGINE_OPTIONS: { value: PageEngine; title: string }[] = [
+  { value: "chromium", title: ENGINE_NAMES.chromium },
+  { value: "webkit", title: ENGINE_NAMES.webkit },
+];
+
+const MODE_OPTIONS: SegmentOption<EngineMode>[] = [
+  { value: "automatic", title: "Automatic" },
   { value: "chromium", title: ENGINE_NAMES.chromium },
   { value: "webkit", title: ENGINE_NAMES.webkit },
 ];
@@ -30,9 +37,18 @@ export function EnginesPane() {
   const sites = Object.keys(rules).sort((a, b) => siteLabel(a).localeCompare(siteLabel(b)));
   const protectedVideo = useSettings((s) => s.protectedVideoInWebKit);
   const setDefault = (value: PageEngine) => updateSettings({ pageEngine: value });
+  const { mode, switching } = useEngineMode();
 
   return (
     <View>
+      <Group>
+        <Row anchor="engines.mode">
+          <View pointerEvents={switching ? "none" : "auto"}>
+            <Segmented options={MODE_OPTIONS} value={mode} onChange={(next) => void setEngineMode(next)} />
+          </View>
+        </Row>
+      </Group>
+
       <SectionHeader title="Default engine" />
       <Group>
         <Row anchor="engines.defaultEngine">
@@ -59,7 +75,7 @@ export function EnginesPane() {
       <Group>
         <Row anchor="engines.separateData" />
         <Row anchor="engines.chromiumOnly" />
-        <PasskeysRow />
+        {mode !== "chromium" ? <PasskeysRow /> : null}
       </Group>
     </View>
   );

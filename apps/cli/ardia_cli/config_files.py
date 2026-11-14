@@ -20,6 +20,7 @@ RESERVED_SETTINGS = (
     "defaultProfileId",
     "customSearchUrl",
     "customSearchEngines",
+    "engineMode",
     "pageEngine",
     "websiteEngines",
     "protectedVideoInWebKit",

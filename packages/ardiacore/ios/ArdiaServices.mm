@@ -128,6 +128,10 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
   return StoreFolder(profile, extensionId, version);
 }
 
++ (NSString *)profileDirectory:(NSString *)profile {
+  return ProfileDirectory(profile);
+}
+
 + (void)call:(NSString *)name profile:(NSString *)profile args:(NSDictionary *)args completion:(ArdiaCoreResult)completion {
   [ArdiaEngineBridge call:name profile:profile args:args ? JSONText(args) : nil completion:^(NSString *json) { completion(Parse(json)); }];
 }

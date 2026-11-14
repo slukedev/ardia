@@ -101,6 +101,7 @@ function PanelCard({ windowId, panel }: { windowId: string; panel: SidePanel }) 
           ref={web}
           style={StyleSheet.absoluteFill}
           url={url}
+          engine={url.startsWith("webkit-extension:") ? "webkit" : undefined}
           profile={pageProfile}
           standalone
           extensionHost="sidePanel"

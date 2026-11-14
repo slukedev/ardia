@@ -3,6 +3,16 @@ import WebKit
 
 extension WebKitHub {
   static let httpOnlyCookieKey = HTTPCookiePropertyKey("HttpOnly")
+  static let createdCookieKey = HTTPCookiePropertyKey("Created")
+  private static let earliestCreated = Date(timeIntervalSince1970: 946_684_800)
+
+  static func created(_ cookie: HTTPCookie) -> Date? {
+    let raw = cookie.properties?[createdCookieKey]
+    let seconds = (raw as? NSNumber)?.doubleValue ?? (raw as? String).flatMap(Double.init)
+    guard let seconds, seconds.isFinite else { return nil }
+    let date = Date(timeIntervalSinceReferenceDate: seconds)
+    return date > earliestCreated && date <= Date().addingTimeInterval(60) ? date : nil
+  }
 
   static func httpCookie(fromEngine cookie: [String: Any]) -> HTTPCookie? {
     guard cookie["partitionKey"] == nil || cookie["partitionKey"] is NSNull, cookie["partitionKeyOpaque"] as? Bool != true,
@@ -86,15 +96,21 @@ extension WebKitHub {
           "sourceScheme": cookie.isSecure ? "secure" : "nonSecure",
         ]
         if !cookie.isSessionOnly, let expires = cookie.expiresDate { entry["expires"] = expires.timeIntervalSince1970 * 1000 }
+        if let created = Self.created(cookie) { entry["created"] = created.timeIntervalSince1970 * 1000 }
         return entry
       }
-      guard !wire.isEmpty, var json = try? JSONSerialization.data(withJSONObject: ["cookies": wire]) else { return completion(0) }
+      guard !wire.isEmpty, var json = try? JSONSerialization.data(withJSONObject: ["cookies": wire, "replaceOlder": true]) else { return completion(0) }
       json.append(0)
       let secret = NSMutableData(data: json)
       json.resetBytes(in: 0..<json.count)
       ArdiaEngineBridge.callWithSecret("ac_cookies_import", profile: profile, args: secret) { reply in
         let parsed = (try? JSONSerialization.jsonObject(with: Data(reply.utf8))) as? [String: Any]
-        DispatchQueue.main.async { completion((parsed?["imported"] as? NSNumber)?.intValue ?? 0) }
+        let imported = (parsed?["imported"] as? NSNumber)?.intValue ?? 0
+        let replaced = (parsed?["replaced"] as? NSNumber)?.intValue ?? 0
+        DispatchQueue.main.async {
+          for _ in 0..<max(0, min(replaced, 500)) { ArdiaEvents.emit("webKit.counted", data: ["name": "cookieReplaced"]) }
+          completion(imported + replaced)
+        }
       }
     }
   }

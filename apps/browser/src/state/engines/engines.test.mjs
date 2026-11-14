@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chosenEngine, engineForUrl, protectedVideoSite, recommendedEngineFor, ruleFor, siteOf, tabEngine, typedNavigationEngine, visitRecorder } from "./engines.ts";
+import {
+  builtInEngine,
+  canSwitchEngine,
+  chosenEngine,
+  defaultEngine,
+  engineForUrl,
+  engineUnderMode,
+  modeEngineFor,
+  protectedVideoSite,
+  recommendedEngineFor,
+  ruleFor,
+  siteOf,
+  switchableEngine,
+  tabEngine,
+  typedNavigationEngine,
+  visitRecorder,
+} from "./engines.ts";
 import { makeTab, snapshotTab } from "../browser/model.ts";
 import { carriableCookies, cookieAddresses } from "./signInCookies.ts";
 
@@ -99,6 +115,71 @@ test("a closed WebKit tab reopens in WebKit, whatever restore id it carries", ()
   const s = state([reopened]);
   assert.equal(tabEngine(s, reopened.id), "webkit");
   assert.equal(snapshotTab(makeTab("w1", "default", "https://a.com/")).engine, undefined);
+});
+
+test("Chromium only opens every page in Chromium: no rules, no streaming sites, no WebKit adoption", () => {
+  const rules = { websiteEngines: { "https://a.com": "webkit" }, protectedVideoInWebKit: true, pageEngine: "webkit", engineMode: "chromium" };
+  const s = state(
+    [
+      tab("kept", { engine: "webkit", url: "https://b.com/" }),
+      tab("popup", { url: "https://c.com/", page: { kind: "adopted", adopt: "webkit:1", nav: null } }),
+      tab("fresh", { url: "https://www.netflix.com/" }),
+    ],
+    rules,
+  );
+  for (const id of ["kept", "popup", "fresh"]) assert.equal(tabEngine(s, id), "chromium", id);
+  assert.equal(engineForUrl(s, "https://a.com/"), "chromium");
+  assert.equal(chosenEngine(s, "https://www.netflix.com/"), "chromium");
+  assert.equal(builtInEngine(s, "https://www.netflix.com/"), undefined);
+  assert.equal(ruleFor(s, "https://a.com/"), undefined);
+  assert.equal(defaultEngine(s), "chromium");
+  assert.equal(typedNavigationEngine(s, s.tabs.kept, "https://a.com/"), "chromium");
+  assert.equal(switchableEngine(s, "https://a.com/"), false);
+  assert.equal(switchableEngine(state([], {}), "https://a.com/"), true);
+});
+
+test("WebKit only opens every web page in WebKit, and keeps browser pages, the Web Store and Chrome-driven tabs on Chromium", () => {
+  const s = state(
+    [
+      tab("kept", { engine: "chromium", url: "https://b.com/" }),
+      tab("rule", { url: "https://a.com/" }),
+      tab("blank"),
+      tab("restored", { engine: "chromium", url: "https://d.com/", page: { kind: "adopted", adopt: "restore:9", nav: null } }),
+      tab("internal", { url: "chrome://extensions/", page: { kind: "loaded", nav: { url: "chrome://extensions/", seq: 1 } } }),
+      tab("store", { url: "https://chromewebstore.google.com/detail/abc" }),
+      tab("cli", { engine: "chromium", url: "https://e.com/", page: { kind: "adopted", adopt: "tab:7", nav: null } }),
+      tab("cliPopup", { url: "https://f.com/", openerId: "cli", page: { kind: "adopted", adopt: "ardiacore:8", nav: null } }),
+      tab("pagePopup", { url: "https://g.com/", openerId: "internal", page: { kind: "adopted", adopt: "ardiacore:9", nav: null } }),
+    ],
+    { engineMode: "webkit", websiteEngines: { "https://a.com": "chromium" } },
+  );
+  for (const id of ["kept", "rule", "blank", "restored", "pagePopup"]) assert.equal(tabEngine(s, id), "webkit", id);
+  for (const id of ["internal", "store", "cli", "cliPopup"]) assert.equal(tabEngine(s, id), "chromium", id);
+  assert.equal(typedNavigationEngine(s, s.tabs.cli, "https://a.com/"), "webkit");
+  assert.equal(typedNavigationEngine(s, s.tabs.kept, "https://chromewebstore.google.com/"), "chromium");
+  assert.equal(recommendedEngineFor(s, "https://www.netflix.com/"), "webkit");
+  assert.equal(modeEngineFor(s, s.tabs.internal, "https://x.com/"), "webkit");
+  assert.equal(modeEngineFor(s, s.tabs.cli, "https://x.com/"), "chromium");
+  assert.equal(modeEngineFor(state([], {}), s.tabs.kept, "https://x.com/"), undefined);
+});
+
+test("leaving a single-engine mode puts each tab back where Automatic would open it", () => {
+  const s = state([tab("a", { engine: "webkit", url: "https://a.com/" }), tab("n", { engine: "webkit", url: "https://www.netflix.com/" }), tab("x", { engine: "webkit", url: "chrome://version" })], {
+    protectedVideoInWebKit: true,
+    engineMode: "automatic",
+  });
+  assert.equal(engineUnderMode(s, s.tabs.a), "chromium");
+  assert.equal(engineUnderMode(s, s.tabs.n), "webkit");
+  assert.equal(engineUnderMode(s, s.tabs.x), "chromium");
+  assert.equal(tabEngine(s, "a"), "webkit");
+});
+
+test("the Web Store always opens in Chromium, which installs its extensions", () => {
+  const s = state([tab("w", { engine: "webkit", url: "https://chromewebstore.google.com/detail/x" })], { pageEngine: "webkit" });
+  assert.equal(tabEngine(s, "w"), "chromium");
+  assert.equal(chosenEngine(s, "https://chromewebstore.google.com/"), "chromium");
+  assert.equal(canSwitchEngine("https://chromewebstore.google.com/detail/x"), false);
+  assert.equal(canSwitchEngine("https://chromewebstore.google.com.evil.example/"), true);
 });
 
 function recorder() {

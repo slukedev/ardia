@@ -36,6 +36,14 @@ public class WebKitModule: Module {
     "syncExtensions": { args, reply in
       WebKitExtensions.shared.sync(profile: args.profile, entries: try args.dicts("extensions")) { reply.ok($0) }
     },
+    "extensionReply": { args, reply in
+      WebKitExtensions.shared.reply(try args.text("id"), payload: try args.dict("reply"))
+      reply.ok()
+    },
+    "extensionEvent": { args, reply in
+      WebKitExtensions.shared.event(profile: args.profile, payload: try args.dict("event"))
+      reply.ok()
+    },
     "passkeyAccess": { _, reply in reply.ok(WebKitPasskeys.access()) },
     "requestPasskeyAccess": { _, reply in WebKitPasskeys.requestAccess { reply.ok($0) } },
   ].merging(LaunchConfig.shared.testInstance ? testInstanceCalls : [:]) { call, _ in call })

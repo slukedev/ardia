@@ -17,7 +17,8 @@ const { useBrowser } = await import("../browser/store.ts");
 const model = await import("../browser/model.ts");
 const { webviews } = await import("../../platform/webviews.ts");
 const { patchPage, pageOf } = await import("../tabs/pageState.ts");
-const { goBackAcrossEngines, offerWebKit } = await import("./actions.ts");
+const { followSiteChoice, goBackAcrossEngines, offerWebKit, openPageIn, setEngineMode, useEngineModeSwitch, useEngineOffers } = await import("./actions.ts");
+const { tabEngine } = await import("./engines.ts");
 const { dropSwap, useRetiringPages } = await import("./engineSwap.ts");
 
 const S = () => useBrowser.getState();
@@ -67,5 +68,98 @@ test("a streaming site moves to WebKit quietly: the old page is held until the n
   dropSwap(tabId);
   assert.equal(useRetiringPages.getState()[tabId], undefined);
   assert.deepEqual(S().settings.websiteEngines, {});
+  webviews.clear();
+});
+
+function liveTab(url, engine, unsaved = false) {
+  const w = S().createWindow({ url });
+  const tabId = model.activeTabId(S(), w);
+  S().updateTab(tabId, { engine, url });
+  webviews.set(tabId, { evaluate: (script) => Promise.resolve(script.includes("defaultValue") ? unsaved : false), pageCookies: () => Promise.resolve([]) });
+  return tabId;
+}
+
+test("WebKit only moves every open page there, holding each old page until the new one paints", async () => {
+  S().hydrate({});
+  const a = liveTab("https://a.com/", "chromium");
+  const b = liveTab("https://b.com/", "chromium");
+  patchPage(a, { engineBack: { engine: "webkit", url: "https://z.com/" } });
+  const switching = setEngineMode("webkit");
+  assert.equal(useEngineModeSwitch.getState().pending, "webkit");
+  assert.equal(await switching, true);
+  assert.equal(S().settings.engineMode, "webkit");
+  for (const id of [a, b]) {
+    assert.equal(S().tabs[id].engine, "webkit");
+    assert.equal(tabEngine(S(), id), "webkit");
+    assert.deepEqual(useRetiringPages.getState()[id], { engine: "chromium" });
+    dropSwap(id);
+  }
+  assert.equal(S().tabs[a].page.nav.url, "https://a.com/");
+  assert.equal(pageOf(a).engineBack, null);
+  assert.equal(useEngineModeSwitch.getState().pending, null);
+  webviews.clear();
+});
+
+test("a mode change asks once when a page has unsaved input, and Cancel leaves the mode and every tab alone", async () => {
+  S().hydrate({});
+  const a = liveTab("https://a.com/", "chromium", true);
+  assert.equal(await setEngineMode("webkit"), false);
+  assert.equal(S().settings.engineMode, "automatic");
+  assert.equal(S().tabs[a].engine, "chromium");
+  assert.equal(useRetiringPages.getState()[a], undefined);
+  webviews.clear();
+});
+
+test("Chromium only offers no WebKit move for protected video and refuses a move to WebKit, and Automatic puts the streaming site back", async () => {
+  S().hydrate({});
+  const a = liveTab("https://www.netflix.com/watch/1", "webkit");
+  assert.equal(await setEngineMode("chromium"), true);
+  dropSwap(a);
+  assert.equal(tabEngine(S(), a), "chromium");
+  offerWebKit(a, { keySystem: "com.widevine.alpha", main: true });
+  await settle();
+  assert.deepEqual(useEngineOffers.getState(), {});
+  assert.equal(await openPageIn(a, "webkit"), false);
+  assert.equal(tabEngine(S(), a), "chromium");
+  assert.equal(await setEngineMode("automatic"), true);
+  dropSwap(a);
+  assert.equal(tabEngine(S(), a), "webkit");
+  webviews.clear();
+});
+
+test("in WebKit only, a link from a Chromium page to a website moves the tab to WebKit with Back to the page before", async () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const w = S().createWindow({ url: "chrome://extensions/" });
+  const tabId = model.activeTabId(S(), w);
+  webviews.set(tabId, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  S().updateTab(tabId, { url: "https://developer.chrome.com/docs" });
+  followSiteChoice(tabId, "chromium", "https://developer.chrome.com/docs", "chrome://extensions/");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(tabEngine(S(), tabId), "webkit");
+  assert.equal(S().tabs[tabId].page.nav.url, "https://developer.chrome.com/docs");
+  assert.deepEqual(pageOf(tabId).engineBack, { engine: "chromium", url: "chrome://extensions/" });
+  dropSwap(tabId);
+  webviews.clear();
+});
+
+test("in WebKit only, a link from a website into the Web Store moves to Chromium, and the Web Store's own links stay there", async () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const w = S().createWindow({ url: "https://blog.example/" });
+  const tabId = model.activeTabId(S(), w);
+  webviews.set(tabId, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
+  assert.equal(tabEngine(S(), tabId), "webkit");
+  S().updateTab(tabId, { url: "https://chromewebstore.google.com/detail/abc" });
+  followSiteChoice(tabId, "webkit", "https://chromewebstore.google.com/detail/abc", "https://blog.example/");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  dropSwap(tabId);
+  S().updateTab(tabId, { url: "https://accounts.google.com/signin" });
+  followSiteChoice(tabId, "chromium", "https://accounts.google.com/signin", "https://chromewebstore.google.com/detail/abc");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  assert.equal(useRetiringPages.getState()[tabId], undefined);
   webviews.clear();
 });

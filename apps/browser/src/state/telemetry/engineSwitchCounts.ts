@@ -16,18 +16,74 @@ const none = () => ({
   webKitAutofillSaveOffers: 0,
   webKitAutofillSaves: 0,
   webKitNotifications: 0,
+  webKitAutofillUpdateOffers: 0,
+  webKitAutofillUpdates: 0,
+  webKitAutofillNevers: 0,
+  webKitCookiesReplaced: 0,
+  webKitWorkerNotifications: 0,
+  webKitWorkerShownNotifications: 0,
+  webKitWorkerClicks: 0,
+  webKitTranslations: 0,
+  webKitShimDownloads: 0,
+  webKitShimHistory: 0,
+  webKitShimBookmarks: 0,
+  webKitShimTabGroups: 0,
+  webKitShimSidePanel: 0,
+  webKitNativeHostLaunches: 0,
+  webKitNativeHostFailures: 0,
+  webKitPrivateExtensionsLoaded: 0,
+  modeChanges: 0,
+  modeChangesCancelled: 0,
+  modeTabsMoved: 0,
 });
 
 let pending = none();
 
-export type WebKitCount = "autofillFill" | "autofillSaveOffer" | "autofillSave" | "notification" | "extensionAction";
+export type WebKitCount =
+  | "autofillFill"
+  | "autofillSaveOffer"
+  | "autofillSave"
+  | "notification"
+  | "autofillUpdateOffer"
+  | "autofillUpdate"
+  | "autofillNever"
+  | "cookieReplaced"
+  | "workerNotification"
+  | "workerShownNotification"
+  | "workerClick"
+  | "translation"
+  | "extensionAction"
+  | "shimDownloads"
+  | "shimHistory"
+  | "shimBookmarks"
+  | "shimTabGroups"
+  | "shimSidePanel"
+  | "nativeHostLaunch"
+  | "nativeHostFailure"
+  | "privateExtensionLoaded";
 
 const WEBKIT_COUNTS = {
   autofillFill: "webKitAutofillFills",
   autofillSaveOffer: "webKitAutofillSaveOffers",
   autofillSave: "webKitAutofillSaves",
   notification: "webKitNotifications",
+  autofillUpdateOffer: "webKitAutofillUpdateOffers",
+  autofillUpdate: "webKitAutofillUpdates",
+  autofillNever: "webKitAutofillNevers",
+  cookieReplaced: "webKitCookiesReplaced",
+  workerNotification: "webKitWorkerNotifications",
+  workerShownNotification: "webKitWorkerShownNotifications",
+  workerClick: "webKitWorkerClicks",
+  translation: "webKitTranslations",
   extensionAction: "webKitExtensionActions",
+  shimDownloads: "webKitShimDownloads",
+  shimHistory: "webKitShimHistory",
+  shimBookmarks: "webKitShimBookmarks",
+  shimTabGroups: "webKitShimTabGroups",
+  shimSidePanel: "webKitShimSidePanel",
+  nativeHostLaunch: "webKitNativeHostLaunches",
+  nativeHostFailure: "webKitNativeHostFailures",
+  privateExtensionLoaded: "webKitPrivateExtensionsLoaded",
 } as const satisfies Record<WebKitCount, keyof ReturnType<typeof none>>;
 
 export function noteEngineSwap(to: "chromium" | "webkit", swap: { ms: number; timedOut: boolean; hidden: boolean; scroll: boolean; zoom: boolean }) {
@@ -52,7 +108,16 @@ export function noteWebKitExtensions(loaded: number, failed: number) {
   pending.webKitExtensionsFailed = Math.max(pending.webKitExtensionsFailed, failed);
 }
 
-export const noteWebKitCount = (name: WebKitCount) => void pending[WEBKIT_COUNTS[name]]++;
+export function noteEngineModeChange({ cancelled, moved }: { cancelled: boolean; moved: number }) {
+  if (cancelled) return void pending.modeChangesCancelled++;
+  pending.modeChanges++;
+  pending.modeTabsMoved += Math.max(0, moved);
+}
+
+export function noteWebKitCount(name: WebKitCount) {
+  const key = WEBKIT_COUNTS[name];
+  if (key) pending[key]++;
+}
 
 export function takeEngineSwitchCounts() {
   const taken = pending;
@@ -75,5 +140,24 @@ export function takeEngineSwitchCounts() {
     webkit_autofill_save_offers: taken.webKitAutofillSaveOffers,
     webkit_autofill_saves: taken.webKitAutofillSaves,
     webkit_notifications: taken.webKitNotifications,
+    webkit_autofill_update_offers: taken.webKitAutofillUpdateOffers,
+    webkit_autofill_updates: taken.webKitAutofillUpdates,
+    webkit_autofill_nevers: taken.webKitAutofillNevers,
+    webkit_cookies_replaced: taken.webKitCookiesReplaced,
+    webkit_worker_notifications: taken.webKitWorkerNotifications,
+    webkit_worker_shown_notifications: taken.webKitWorkerShownNotifications,
+    webkit_worker_clicks: taken.webKitWorkerClicks,
+    webkit_translations: taken.webKitTranslations,
+    webkit_extension_downloads_calls: taken.webKitShimDownloads,
+    webkit_extension_history_calls: taken.webKitShimHistory,
+    webkit_extension_bookmarks_calls: taken.webKitShimBookmarks,
+    webkit_extension_tab_groups_calls: taken.webKitShimTabGroups,
+    webkit_extension_side_panel_calls: taken.webKitShimSidePanel,
+    webkit_native_host_launches: taken.webKitNativeHostLaunches,
+    webkit_native_host_failures: taken.webKitNativeHostFailures,
+    webkit_private_extensions_loaded: taken.webKitPrivateExtensionsLoaded,
+    engine_mode_changes: taken.modeChanges,
+    engine_mode_changes_cancelled: taken.modeChangesCancelled,
+    engine_mode_tabs_moved: taken.modeTabsMoved,
   };
 }

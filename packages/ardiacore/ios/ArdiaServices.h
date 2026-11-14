@@ -94,6 +94,7 @@ typedef NS_ENUM(NSInteger, ArdiaProfileToggle) {
 
 + (nullable NSString *)storeExtensionFolder:(NSString *)profile extension:(NSString *)extensionId version:(NSString *)version
     NS_SWIFT_NAME(storeExtensionFolder(profile:extension:version:));
++ (NSString *)profileDirectory:(NSString *)profile NS_SWIFT_NAME(profileDirectory(_:));
 @end
 
 NS_ASSUME_NONNULL_END

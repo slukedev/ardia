@@ -74,7 +74,7 @@ test("WebKit tabs follow the user's sight of their window the way Chromium views
   assert.match(sight, /let activeCapture = webView\?\.cameraCaptureState == \.active \|\| webView\?\.microphoneCaptureState == \.active/);
   assert.match(sight, /playing: !playingFrames\.isEmpty \|\| activeCapture/);
   assert.match(tab, /override func viewDidMoveToWindow\(\) \{ super\.viewDidMoveToWindow\(\); watchSight\(\) \}/);
-  assert.match(tab, /var visible = true \{ didSet \{ updateHidden\(\); updateSight\(\) \} \}/);
+  assert.match(tab, /var visible = true \{ didSet \{ updateHidden\(\); updateSight\(\)(; noteExtensionTabShown\(\))? \} \}/);
 });
 
 test("leaving opens picture in picture and returning closes it through the page's own player call", () => {

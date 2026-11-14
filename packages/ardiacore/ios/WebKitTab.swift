@@ -80,7 +80,8 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
       emitEverything()
       return
     }
-    let created = WebKitWebView(frame: bounds, configuration: WebKitHub.shared.configuration(profile: profile))
+    let configuration = WebKitExtensions.shared.pageConfiguration(for: initialURL, profile: profile) ?? WebKitHub.shared.configuration(profile: profile)
+    let created = WebKitWebView(frame: bounds, configuration: configuration)
     attach(created)
     emit("ready", [:])
     if let url = initialURL, !url.isEmpty { loadWhenBlockerReady(url, in: created) }

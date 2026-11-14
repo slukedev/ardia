@@ -1,5 +1,8 @@
 import { type SettingSection } from "./types";
 import type { SettingsPane } from "../../../state/settings/settingsWindows";
+import type { Settings } from "../../../state/settings/settings";
+
+const automaticEngine = (s: Settings) => s.engineMode === "automatic";
 
 export const toolRows = {
   shortcuts: [
@@ -82,25 +85,37 @@ export const toolRows = {
   ],
   engines: [
     {
+      section: "Engine",
+      rows: {
+        mode: {
+          title: "Engine",
+          description: "Automatic picks one for each site.",
+          keywords: ["engine mode", "only", "just", "chromium only", "webkit only", "safari", "automatic", "always"],
+        },
+      },
+    },
+    {
       section: "Default engine",
       rows: {
         defaultEngine: {
           advanced: true,
           title: "Open pages in",
           description: "New pages open in this engine unless a website rule says otherwise.",
+          shown: automaticEngine,
           keywords: ["engine", "webkit", "chromium", "safari", "drm", "netflix", "fairplay", "widevine"],
         },
         recommendedDefault: {
           advanced: true,
           title: "Use Recommended Default",
           description: "Chromium runs extensions and the ad blocker. Sites that need protected video can still open in WebKit.",
+          shown: automaticEngine,
           keywords: ["reset", "recommended", "chromium"],
         },
         protectedVideo: {
           advanced: true,
           title: "Open streaming sites in WebKit",
           description: "Netflix, Disney+, Max, Prime Video, Hulu, Apple TV+, Spotify and other sites whose video is protected open in WebKit, which plays it. A website rule wins.",
-          shown: (s) => s.pageEngine !== "webkit",
+          shown: (s) => automaticEngine(s) && s.pageEngine !== "webkit",
           keywords: ["drm", "netflix", "disney", "hbo", "max", "prime video", "hulu", "spotify", "apple tv", "fairplay", "widevine", "streaming", "tencent video", "v.qq.com"],
         },
       },
@@ -112,6 +127,7 @@ export const toolRows = {
           advanced: true,
           title: "Website rules",
           description: "Sites that always open in a chosen engine. Links opened from a page stay on that page's engine.",
+          shown: automaticEngine,
           keywords: ["opens in", "site engine", "rule", "webkit", "chromium"],
         },
       },
@@ -123,18 +139,21 @@ export const toolRows = {
           advanced: true,
           title: "Separate sign-ins",
           description: "Each engine keeps its own cookies and site data in every profile. Spaces, tabs, history and settings are shared.",
+          shown: automaticEngine,
           keywords: ["cookies", "site data", "sign in", "logged out"],
         },
         chromiumOnly: {
           advanced: true,
-          title: "Extensions and ad blocking are Chromium only",
-          description: "WebKit pages run without extensions or the ad blocker for now.",
-          keywords: ["extensions", "ad blocker", "ublock", "content blocker"],
+          title: "Extensions in WebKit",
+          description: "Needs macOS 15.4 or later.",
+          shown: (s) => s.engineMode !== "chromium",
+          keywords: ["extensions", "add-ons", "macos"],
         },
         passkeys: {
           advanced: true,
           title: "Passkeys",
           description: "WebKit pages can't use passkeys until Apple grants Ardia its browser passkey entitlement. Sign in with a passkey in Chromium meanwhile.",
+          shown: (s) => s.engineMode !== "chromium",
           keywords: ["passkey", "webauthn", "icloud keychain", "passwords app", "security key"],
         },
       },
@@ -213,7 +232,7 @@ export const toolRows = {
       section: "Web engine",
       rows: {
         chromium: { advanced: true, title: "Chromium", keywords: ["engine", "version", "ardiacore"] },
-        widevine: { advanced: true, title: "Widevine (protected video)", keywords: ["drm", "cdm", "install", "netflix", "disney", "spotify"] },
+        widevine: { advanced: true, title: "Widevine (protected video)", shown: (s) => s.engineMode !== "webkit", keywords: ["drm", "cdm", "install", "netflix", "disney", "spotify"] },
       },
     },
     {

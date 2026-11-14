@@ -16,7 +16,7 @@ import { bookmarksShown } from "../bookmarks/visibility";
 import { calendarMenuItem, dismissNowMenuItems, runCalendarMenu } from "./liveMenus";
 import { newFolderWithTab, removeFromFolder } from "./tileFolderUi";
 import { togglePageEngine } from "../engines/actions";
-import { canSwitchEngine, ENGINE_NAMES, otherEngine, tabEngine } from "../engines/engines";
+import { ENGINE_NAMES, otherEngine, switchableEngine, tabEngine } from "../engines/engines";
 import { bookmarkFolderItems, groupItems, hintWhen, profileItems, sections, windowItems, withAlternate, type Destination } from "./menuParts";
 import { openMultiMenu } from "./multiTabMenu";
 import { tileFolderOf } from "../pins/tileFolders";
@@ -79,7 +79,7 @@ function pinItems(s: BrowserState, tab: Tab, f: Facts): MenuItem[] {
 }
 
 function openItems(s: BrowserState, tab: Tab, f: Facts): MenuItem[] {
-  const engine = canSwitchEngine(tab.url) ? ENGINE_NAMES[otherEngine(tabEngine(s, tab.id))] : null;
+  const engine = switchableEngine(s, tab.url) ? ENGINE_NAMES[otherEngine(tabEngine(s, tab.id))] : null;
   return [
     ...(f.split
       ? [{ id: "unsplit", title: "Remove from Split View", symbol: "rectangle.split.2x1.slash" }]
