@@ -21,4 +21,18 @@ export type PasskeyAccess = { entitled: boolean; status: PasskeyAccessStatus };
 
 export const NO_PASSKEY_ACCESS: PasskeyAccess = { entitled: false, status: "entitlementRequired" };
 
-export const WEBKIT_SITE_SETTINGS: readonly SiteSettingType[] = ["camera", "microphone"];
+export const WEBKIT_SITE_SETTINGS: readonly SiteSettingType[] = ["camera", "microphone", "location", "notifications"];
+
+export type WebKitExtension = {
+  id: string;
+  path: string | null;
+  version: string;
+  name: string;
+  sites: string[];
+  allSites: boolean;
+  incognito: boolean;
+};
+
+export type WebKitExtensionsSync = { available: boolean; loaded: string[]; failed: string[] };
+
+export type WebKitCount = "autofillFill" | "autofillSaveOffer" | "autofillSave" | "notification" | "extensionAction";

@@ -5,6 +5,8 @@ import WebKit
 public class WebKitModule: Module {
   public func definition() -> ModuleDefinition {
     Name(Self.calls.moduleName)
+    Events(Self.calls.domain)
+    Self.calls.forwardEvents(to: self)
 
     Self.calls.function
 
@@ -22,6 +24,17 @@ public class WebKitModule: Module {
     "importCookies": { args, reply in
       let cookies = try args.dicts("cookies")
       WebKitHub.shared.importCookies(cookies, profile: args.profile, storeKey: try args.text("storeKey")) { reply.ok($0) }
+    },
+    "exportCookies": { args, reply in
+      let urls = try args.strings("urls").compactMap(URL.init(string:))
+      WebKitHub.shared.exportCookies(profile: args.profile, urls: urls) { reply.ok($0) }
+    },
+    "setZoom": { args, reply in
+      WebKitHub.shared.setZoom(try args.double("zoom"), profile: args.profile, host: try args.text("host").lowercased())
+      reply.ok()
+    },
+    "syncExtensions": { args, reply in
+      WebKitExtensions.shared.sync(profile: args.profile, entries: try args.dicts("extensions")) { reply.ok($0) }
     },
     "passkeyAccess": { _, reply in reply.ok(WebKitPasskeys.access()) },
     "requestPasskeyAccess": { _, reply in WebKitPasskeys.requestAccess { reply.ok($0) } },

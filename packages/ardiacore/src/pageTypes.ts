@@ -162,6 +162,7 @@ export type ProtectedMediaRequest = { keySystem: string; main: boolean; stage?: 
 
 export type WebViewProps = ViewProps & {
   engine?: PageEngine;
+  retired?: boolean;
   url?: string;
   profile?: string;
   adoptId?: string;

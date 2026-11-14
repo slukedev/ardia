@@ -73,11 +73,6 @@ export const EXPERIMENTS = {
     owner: "window",
     removeBy: "2026-12-15",
   },
-  webkitSignIn: {
-    about: "Moving a Chromium page to WebKit first copies the cookies that page's own address gets into the profile's WebKit store, at most 1.5 s (state/engines/engineSignIn.ts).",
-    owner: "engines",
-    removeBy: "2026-12-15",
-  },
 } as const satisfies Record<string, ExperimentDef>;
 
 type SwitchName = keyof typeof SWITCHES;

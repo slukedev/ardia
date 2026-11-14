@@ -85,7 +85,7 @@ struct WebKitPageEngine: PageEngine {
   }
 
   func siteSettings(profile: String, origin: String, done: @escaping (Any?, String?) -> Void) {
-    done(hub.permissions.siteSettings(profile: profile, origin: origin), nil)
+    hub.permissions.siteSettings(profile: profile, origin: origin) { done($0, nil) }
   }
 
   func setSiteSetting(profile: String, origin: String, type: String, value: String) {

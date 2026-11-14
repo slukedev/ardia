@@ -4,11 +4,12 @@ import { confirm } from "../../platform/dialogs";
 import { create } from "zustand";
 import { useBrowser } from "../browser/store";
 import { pageOf, patchPage } from "../tabs/pageState";
-import { hideKeyedToast, showToast } from "../app/toasts";
 import { canSwitchEngine, chosenEngine, ENGINE_NAMES, siteOf, tabEngine, visitRecorder, type WebKitPage } from "./engines";
 import { engineProfile, isIncognitoProfile, navigationTo } from "../browser/model";
 import type { Tab } from "../browser/types";
-import { carrySignInToWebKit, signInCarryOn } from "./engineSignIn";
+import { carrySignIn } from "./engineSignIn";
+import { dropSwap, holdPageForSwap } from "./engineSwap";
+import { syncExtensionsToWebKit } from "./webKitExtensions";
 import { wantsPage } from "../tabs/tabPages";
 import { webviews } from "../../platform/webviews";
 import { withDeadline } from "../../lib/deadline";
@@ -22,7 +23,6 @@ const store = () => useBrowser.getState();
 const declinedSites = new Set<string>();
 const movingTabs = new Set<string>();
 const siteMoves = new Map<string, number>();
-const siteWatches = new Map<string, () => void>();
 const SITE_MOVE_SPACING_MS = 10_000;
 const hostLabel = (site: string) => new URL(site).hostname.replace(/^www\./, "");
 
@@ -70,6 +70,11 @@ export async function goBackAcrossEngines(tabId: string): Promise<boolean> {
   const now = store().tabs[tabId];
   if (!leaving || !now || pageUrl(now) !== from || pageOf(tabId).engineBack !== back) return false;
   patchPage(tabId, { engineBack: null });
+  await holdPageForSwap(tabId, tabEngine(store(), tabId), back.engine, back.url, false);
+  if (pageUrl(store().tabs[tabId]) !== from) {
+    dropSwap(tabId);
+    return false;
+  }
   store().updateTab(tabId, { engine: back.engine, page: loadedPage(navigationTo(back.url, true)) });
   return true;
 }
@@ -86,11 +91,19 @@ export async function openPageIn(tabId: string, engine: PageEngine, options: { r
     return true;
   }
   if (options.checkWork !== false && !(await mayLeavePage(t, `Open this page in ${ENGINE_NAMES[engine]}?`, `The page reloads in ${ENGINE_NAMES[engine]}, so changes you made on it may not be saved.`, `Open in ${ENGINE_NAMES[engine]}`))) return false;
-  if (engine === "webkit" && signInCarryOn()) await carrySignInToWebKit(tabId, url);
+  await carrySignIn(tabId, url, engine);
+  const from = tabEngine(store(), tabId);
+  if (from !== engine && wantsPage(store().tabs[tabId])) await holdPageForSwap(tabId, from, engine, url, true);
   const now = store().tabs[tabId];
-  if (!now || (now.url || navigationOf(now)?.url || "") !== url) return false;
+  if (!now || pageUrl(now) !== url) {
+    dropSwap(tabId);
+    return false;
+  }
   saveRule();
-  if (tabEngine(store(), tabId) === engine) return true;
+  if (tabEngine(store(), tabId) === engine) {
+    dropSwap(tabId);
+    return true;
+  }
   store().updateTab(tabId, wantsPage(now) ? { engine, page: loadedPage(navigationTo(now.url || url, true)) } : { engine });
   return true;
 }
@@ -138,26 +151,6 @@ async function moveForProtectedVideo(tabId: string, site: string) {
   } finally {
     movingTabs.delete(tabId);
   }
-  const t = store().tabs[tabId];
-  if (!t) return;
-  const key = `engine-move:${tabId}`;
-  const stillThere = () => siteOf(pageUrl(store().tabs[tabId])) === site;
-  showToast(t.windowId, "Opened in WebKit for protected video", `${hostLabel(site)} plays here with FairPlay. WebKit keeps its own sign-ins.`, {
-    icon: "play.rectangle",
-    key,
-    action: { title: "Move Back", run: () => void (stillThere() && openPageIn(tabId, "chromium", { rule: "chromium" })) },
-  });
-  siteWatches.get(tabId)?.();
-  const unwatchSite = useBrowser.subscribe((s, prev) => {
-    if (s.tabs[tabId] === prev.tabs[tabId] || stillThere()) return;
-    stopWatch();
-    hideKeyedToast(t.windowId, key);
-  });
-  const stopWatch = () => {
-    unwatchSite();
-    if (siteWatches.get(tabId) === stopWatch) siteWatches.delete(tabId);
-  };
-  siteWatches.set(tabId, stopWatch);
 }
 
 export function followSiteChoice(tabId: string, engine: PageEngine, url: string, previousUrl: string) {
@@ -202,6 +195,9 @@ export function noteWebKitPage(tabId: string, page: WebKitPage) {
   const t = store().tabs[tabId];
   if (!t) return;
   watchClosedTabs();
+  const firstVisit = !visitedTabs.has(tabId);
   visitedTabs.add(tabId);
-  visits.note(tabId, isIncognitoProfile(t.profileId) ? null : engineProfile(useBrowser.getState(), t.profileId), page);
+  const profile = isIncognitoProfile(t.profileId) ? null : engineProfile(useBrowser.getState(), t.profileId);
+  if (firstVisit && profile !== null) void syncExtensionsToWebKit(profile);
+  visits.note(tabId, profile, page);
 }

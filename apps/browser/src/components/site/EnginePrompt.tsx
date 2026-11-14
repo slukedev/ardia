@@ -20,7 +20,7 @@ function OfferPopover({ tabId, offer, left, top }: { tabId: string; offer: Engin
         <PromptBody
           icons={["play.circle.fill", "safari"]}
           title={`Play ${offer.host} in WebKit?`}
-          message="This site plays protected video, which Chromium in Ardia can't. The page reloads in WebKit, which keeps its own sign-ins."
+          message="This site's protected video doesn't play in Chromium. It plays in WebKit."
           detail={
             offer.canRemember ? <CheckRow value={remember} onChange={setRemember} label="Don't ask again for this site" /> : undefined
           }

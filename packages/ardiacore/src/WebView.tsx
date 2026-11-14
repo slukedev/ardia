@@ -101,13 +101,13 @@ export const WebView = forwardRef<WebViewHandle, WebViewProps>(function WebView(
 
   const latest = useRef(props);
   latest.current = props;
-  const onPageEvent = useRef((e: NativeSyntheticEvent<PageEvent>) => deliverPageEvent(latest.current, e.nativeEvent)).current;
+  const onPageEvent = useRef((e: NativeSyntheticEvent<PageEvent>) => !latest.current.retired && deliverPageEvent(latest.current, e.nativeEvent)).current;
   const nativeProps: Record<string, unknown> = { onPageEvent };
   const pageEvents: string[] = [];
   for (const [key, value] of Object.entries(props)) {
-    if (key === "engine") continue;
+    if (key === "engine" || key === "retired") continue;
     if (isPageEventProp(key)) {
-      if (typeof value === "function") pageEvents.push(pageEventOf(key));
+      if (typeof value === "function" && !props.retired) pageEvents.push(pageEventOf(key));
       continue;
     }
     nativeProps[key] = (key === "url" || key === "shownUrl") && typeof value === "string" ? toEngineUrl(value) : value;

@@ -18,7 +18,7 @@ import type { ChromeWindowState } from "../windows";
 import type { PasswordExportStatus, SavedPassword } from "../passwords";
 import type { ClearSiteDataResult, SiteSettings, SiteSettingType, SiteSettingValue } from "../siteSettings";
 import type { LinkRoute, TabStripCommand, TabStripTransaction } from "../tabs";
-import type { PageCookie, PageEngine, PasskeyAccess } from "../webkit";
+import type { PageCookie, PageEngine, PasskeyAccess, WebKitCount, WebKitExtension, WebKitExtensionsSync } from "../webkit";
 import type { DisplayMediaSource } from "../pageTypes";
 
 type Profile = { profile: string };
@@ -190,6 +190,9 @@ export type EngineCalls = {
   "webKit.endPrivateSession": [{ session: string }, null];
   "webKit.cookieStoreKey": [Profile, string];
   "webKit.importCookies": [Profile & { storeKey: string; cookies: PageCookie[] }, number];
+  "webKit.exportCookies": [Profile & { urls: string[] }, number];
+  "webKit.setZoom": [Profile & { host: string; zoom: number }, null];
+  "webKit.syncExtensions": [Profile & { extensions: WebKitExtension[] }, WebKitExtensionsSync];
   "webKit.devStoreExists": [Profile, boolean];
   "webKit.devTouchStore": [Profile, boolean];
   "webKit.devHoldStore": [Profile, null];
@@ -207,6 +210,7 @@ export type EngineEvents = {
   "downloads.changed": Download;
   "permissions.requested": PermissionRequest;
   "permissions.dismissed": { id: string };
+  "webKit.counted": { name: WebKitCount };
   "contentBlocker.changed": ContentBlockerStats;
   "extensions.changed": ExtensionsChange;
   "extensions.tabs": TabsRequest;

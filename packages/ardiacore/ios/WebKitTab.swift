@@ -13,7 +13,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
   var initialURL: String?
   var adoptId: String?
   var transferKey: String?
-  var visible = true { didSet { updateHidden(); updateSight() } }
+  var visible = true { didSet { updateHidden(); updateSight(); noteExtensionTabShown() } }
   var autoPictureInPicture = false
   var pageBackgroundColor: NSColor? { didSet { if let color = pageBackgroundColor { webView?.underPageBackgroundColor = color } } }
   let browserId = WebKitHub.shared.nextBrowserId()
@@ -31,7 +31,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     get { webView?.playingFrames ?? [] }
     set { webView?.playingFrames = newValue }
   }
-  private var muted = false
+  private(set) var muted = false
   var sightObserver: NSObjectProtocol?
   private var errorURL: URL?
   private var committedAt: Double = 0
@@ -92,6 +92,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     observations = []
     WebKitHub.shared.permissions.drop(browserId: browserId)
     if let key = transferKey { WebKitHub.shared.transfers.forgetLive(self, key: key) }
+    noteExtensionTabClosed()
     webView = nil
     view.onFocus = nil
     WebKitHub.shared.transfers.unregister(view)
@@ -124,6 +125,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     addSubview(view)
     updateHidden()
     observe(view)
+    noteExtensionTabOpened()
     WebKitHub.shared.permissions.reconcileCapture(view, profile: profile)
     updateSight()
   }
@@ -157,6 +159,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     WebKitHub.shared.permissions.drop(browserId: browserId)
     if let key = transferKey { WebKitHub.shared.transfers.forgetLive(self, key: key) }
     guard let view = webView else { return }
+    noteExtensionTabClosed()
     webView = nil
     view.onFocus = nil
     if let key = transferKey, WebKitHub.shared.transfers.isPrepared(key) {
@@ -195,6 +198,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     ]
     if committedStatus > 0 && !showingError { navigation["httpStatus"] = committedStatus }
     emit("navigation", navigation)
+    noteExtensionTabChanged()
   }
 
   static func hex(_ color: NSColor) -> String? {
@@ -451,7 +455,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     case "scroll":
       guard main, let state = dict?["state"] as? String, ["down", "up", "top"].contains(state) else { return }
       emit("scroll", ["state": state])
-    default: break
+    default: siteMessage(kind, data: dict, frameInfo: frameInfo)
     }
   }
 
@@ -460,7 +464,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     let decide = { (policy: WKNavigationActionPolicy) in decisionHandler(policy, preferences) }
     guard let url = action.request.url else { return decide(.allow) }
     let scheme = url.scheme?.lowercased() ?? ""
-    let webSchemes: Set<String> = ["http", "https", "file", "about", "data", "blob", "javascript", "webkit-pdfjs-viewer"]
+    let webSchemes: Set<String> = ["http", "https", "file", "about", "data", "blob", "javascript", "webkit-pdfjs-viewer", "webkit-extension"]
     if !webSchemes.contains(scheme) {
       decide(.cancel)
       let fromMainFrame = action.sourceFrame.isMainFrame || action.targetFrame?.isMainFrame == true
@@ -521,6 +525,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     emitZoom()
     emitSecurity()
     queueNavigation()
+    siteCommitted()
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -555,19 +560,6 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     errorURL = failing
     showingError = true
     webView.loadHTMLString(Self.errorPage(failing, nsError), baseURL: failing)
-  }
-
-  static func errorPage(_ url: URL, _ error: NSError) -> String {
-    let escape = { (text: String) in
-      text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-    }
-    return """
-      <!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>Can't Open This Page</title>
-      <style>body{font:13px -apple-system,system-ui;display:flex;align-items:center;justify-content:center;height:90vh;margin:0;color:#555}
-      @media (prefers-color-scheme: dark){body{color:#bbb;background:#1e1e1e}}main{max-width:460px;text-align:center}
-      h1{font-size:20px;font-weight:600;color:CanvasText;margin:0 0 8px}p{margin:4px 0;word-break:break-word}</style></head>
-      <body><main><h1>Can't open this page</h1><p>\(escape(url.host ?? url.absoluteString))</p><p>\(escape(error.localizedDescription))</p></main></body></html>
-      """
   }
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {

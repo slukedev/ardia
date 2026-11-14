@@ -15,6 +15,9 @@ import { opaqueCard } from "../ui/opaqueCard";
 import { handOff, takeHandOff, wantsPage } from "../../state/tabs/tabPages";
 import { noteDiscarded, noteGone, noteReady } from "../../state/tabs/tabLifecycle";
 import { noteWebKitPage, offerWebKit, persistEngine } from "../../state/engines/actions";
+import { swapping, watchFirstPaint } from "../../state/engines/engineSwap";
+import { useRetiringEngine } from "../../state/engines/hooks";
+import { noteProtectedVideoRefusal } from "../../state/telemetry/protectedVideoCounts";
 import { webviewRef, webviews } from "../../state/tabs/webviewHandles";
 import { noteIssued, takeStartedNavigation } from "../../state/tabs/earlyNavigate";
 import { currentEngineProfile, currentTab, isTabSilenced } from "../../state/browser/current";
@@ -48,18 +51,31 @@ import { noteAutoPictureInPictureKept, notePageOverlay, noteReopenedPage, noteWe
 import { isAdoptKind } from "../../state/tabs/adoptIds";
 import { firstPagePending, isBlankAddress, noteFirstPagePending, reportedAddress, reportedTitle } from "../../state/tabs/pendingAddress";
 import { STATUS_FLIP_BAND } from "./tokens";
-import { noteProtectedVideoRefusal } from "../../state/telemetry/protectedVideoCounts";
 
 const webViewTab = (t: Tab | undefined) => ({ navigation: navigationOf(t), adoptId: adoptOf(t), profileId: t?.profileId ?? "", shownUrl: t?.url ?? "" });
 
 type TabWebViewProps = { tabId: string; visible: boolean; warm: boolean; peekOf?: string };
 
+const ARRIVING = [StyleSheet.absoluteFill, { opacity: 0 }];
+
 export const TabWebView = memo(function TabWebView(props: TabWebViewProps) {
   const engine = useTabEngine(props.tabId);
-  return <EngineWebView key={engine} engine={engine} {...props} />;
+  const retiring = useRetiringEngine(props.tabId, engine);
+  const shown = useRef(engine);
+  const holding = useRef<PageEngine | null>(null);
+  if (shown.current !== engine) {
+    holding.current = retiring === shown.current && props.visible ? retiring : null;
+    shown.current = engine;
+  }
+  if (holding.current && (retiring !== holding.current || !props.visible)) holding.current = null;
+  const held = holding.current;
+  const live = <EngineWebView key={engine} engine={engine} arriving={!!held} {...props} />;
+  if (!held) return live;
+  const old = <EngineWebView key={held} engine={held} retired {...props} />;
+  return held === "chromium" ? [old, live] : [live, old];
 });
 
-function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps & { engine: PageEngine }) {
+function EngineWebView({ tabId, visible, warm, peekOf, engine, retired = false, arriving = false }: TabWebViewProps & { engine: PageEngine; retired?: boolean; arriving?: boolean }) {
   const { navigation, adoptId, profileId, shownUrl } = useTabValue(tabId, webViewTab, shallowEqual);
   const neighbour = useBrowserWhile(warm, (s) => warm && s.windows[s.tabs[tabId]?.windowId ?? ""]?.profileId !== profileId);
   const tab = () => currentTab(tabId);
@@ -80,7 +96,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
   const arrived = useRef(!!handoff && (handoff.seq === navigation?.seq || isBlankAddress(navigation?.url ?? "")));
   const loadsOnCreate = useRef(engine === "webkit" && !handoff ? navigation?.seq : undefined);
   useEffect(() => {
-    if (!navigation) return;
+    if (!navigation || retired) return;
     noteIssued(tabId, navigation.seq);
     if (arrived.current) {
       arrived.current = false;
@@ -103,6 +119,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
   useEffect(() => {
     persistEngine(tabId, engine);
     return () => {
+      if (wentRetired.current) return;
       noteGone(tabId);
       noteFirstPagePending(tabId, false);
       forgetUnreadIfGone(tabId);
@@ -113,8 +130,18 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
     if (waitsOffScreen) noteWebKitPageKeptHidden();
   }, [waitsOffScreen]);
   const mountedProfile = useRef(profileId);
+  const wentRetired = useRef(false);
+  useLayoutEffect(() => {
+    wentRetired.current = retired;
+    if (!retired) return;
+    setPageProgress(tabId, 0);
+    pageEnded(tabId);
+    noteGone(tabId);
+    noteFirstPagePending(tabId, false);
+  }, [retired]);
   useLayoutEffect(
     () => () => {
+      if (wentRetired.current) return;
       const t = tab();
       const sameEngine = currentTabEngine(tabId) === engine;
       if (wantsPage(t) && sameEngine && currentEngineProfile(t.profileId) === currentEngineProfile(mountedProfile.current) && !isQuitting()) handOff(tabId, currentEngineProfile(t.profileId), engine);
@@ -135,9 +162,10 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
 
   return (
     <WebView
-      ref={ref}
+      ref={retired ? undefined : ref}
       engine={engine}
-      style={StyleSheet.absoluteFill}
+      retired={retired}
+      style={arriving ? ARRIVING : StyleSheet.absoluteFill}
       url={navigation?.url ?? (adoptId ? tab()?.url : undefined)}
       profile={currentEngineProfile(profileId)}
       adoptId={adoptId}
@@ -156,6 +184,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
         noteTabReady(tabId);
         noteReady(tabId);
         void webviews.get(tabId)?.setMuted(isTabSilenced(tabId));
+        watchFirstPaint(tabId, engine, visible);
       }}
       onNavigationChange={({ url: reported, title: reportedPageTitle, canGoBack, canGoForward, isLoading, themeColor, themeColorSource, initialDocumentAccessed, committedInitial, committedUrl, committedAt, httpStatus }) => {
         noteCommit(tabId, committedUrl, committedAt, httpStatus);
@@ -178,7 +207,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
         const restoring = restore.current !== null;
         if (target !== null && isBlankAddress(url) && !target.startsWith("about:") && untouched) {
           noteFirstPagePending(tabId, true);
-          updateLive(tabId, { isLoading: true });
+          if (!swapping(tabId)) updateLive(tabId, { isLoading: true });
           return;
         }
         noteFirstPagePending(tabId, firstPagePending({ url, committedInitial, isLoading }));
@@ -194,8 +223,8 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
           patchPage(tabId, { newTabShown: null });
         }
         if (fromNewTab.current && url && !isBlankAddress(url)) patchPage(tabId, { backToNewTab: true });
-        const shownTitle = !title && restoring ? (tab()?.title ?? title) : title;
-        updateTab(tabId, { url, title: shownTitle }, { isLoading, canGoBack, canGoForward, themeColor: shownTheme });
+        const shownTitle = !title && (restoring || swapping(tabId)) ? (tab()?.title ?? title) : title;
+        updateTab(tabId, { url, title: shownTitle }, { isLoading: isLoading && !swapping(tabId), canGoBack, canGoForward, themeColor: shownTheme });
         dropOutlivedFavicon(tabId, url, isLoading);
         if (engine === "webkit") noteWebKitPage(tabId, { url, title, isLoading, committedUrl: committedUrl ?? "" });
         if (lastPage.current !== null && withoutFragment(url) !== lastPage.current) leftPage(tabId, url, lastPage.current, engine, peekOf !== undefined);
@@ -209,7 +238,7 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
         pending.current = null;
         downloadNavigated(tabId, committedUrl, skipped);
       }}
-      onProgress={(progress) => !prewarmOnly() && setPageProgress(tabId, progress)}
+      onProgress={(progress) => !prewarmOnly() && !swapping(tabId) && setPageProgress(tabId, progress)}
       onZoom={({ zoom, user }) => {
         updateTab(tabId, { zoom });
         if (user) zoomChangedByUser(tabId);

@@ -40,19 +40,23 @@ extension WebKitTab: PageTab {
 
   func exitPictureInPicture() { setPictureInPicture(false) { _ in } }
 
-  func pageCookies(_ urls: [String], completion: @escaping ([[String: Any]]?) -> Void) { completion([]) }
+  func pageCookies(_ urls: [String], completion: @escaping ([[String: Any]]?) -> Void) {
+    WebKitHub.shared.engineCookies(profile: profile, urls: urls.compactMap(URL.init(string:)), completion: completion)
+  }
 
   func openBlockedPopup(_ popupId: String, always: Bool) {}
 
-  func resolvePasswordPrompt(_ action: String, username: String?, password: String?) {}
+  func resolvePasswordPrompt(_ action: String, username: String?, password: String?) {
+    WebKitHub.shared.logins.resolveSave(self, action: action, username: username, password: password)
+  }
 
   func resolveAutofillPrompt(_ promptId: Int, action: String) {}
 
-  func executeExtensionAction(_ extensionId: String) -> String? { nil }
+  func executeExtensionAction(_ extensionId: String) -> String? { runExtensionAction(extensionId) }
 
   func resolveDisplayMedia(_ requestId: String, sourceId: String?, audio: Bool) {}
 
-  func notificationAction(_ notificationId: String, action: String) {}
+  func notificationAction(_ notificationId: String, action: String) { WebKitHub.shared.notifications.act(notificationId, action: action, in: self) }
 
   func resolveUnresponsive(terminate: Bool) {}
 

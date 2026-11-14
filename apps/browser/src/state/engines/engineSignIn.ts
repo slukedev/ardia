@@ -1,40 +1,52 @@
-import { importWebKitCookies, webKitCookieStoreKey } from "../../platform/webkit";
-import type { WebViewHandle } from "../../platform/tabs";
+import { exportWebKitCookies, importWebKitCookies, webKitCookieStoreKey } from "../../platform/webkit";
+import type { PageEngine, WebViewHandle } from "../../platform/tabs";
 import { useBrowser } from "../browser/store";
 import { tabEngine } from "./engines";
-import { engineProfile } from "../browser/model";
+import { engineProfile, isIncognitoProfile } from "../browser/model";
 import { carriableCookies, cookieAddresses } from "./signInCookies";
 import { webviews } from "../../platform/webviews";
-import { experimentOn } from "../../platform/killSwitches";
 import { withDeadline } from "../../lib/deadline";
+import { noteCookiesCarried } from "../telemetry/engineSwitchCounts";
 
 const CARRY_DEADLINE_MS = 1500;
 
-let carryOn: boolean | undefined;
-
-export const signInCarryOn = () => (carryOn ??= experimentOn("webkitSignIn"));
-
-function stillChromiumPage(tabId: string, profile: string, web: WebViewHandle) {
+function stillPage(tabId: string, profile: string, web: WebViewHandle, engine: PageEngine) {
   const s = useBrowser.getState();
   const t = s.tabs[tabId];
-  return !!t && engineProfile(s, t.profileId) === profile && webviews.get(tabId) === web && tabEngine(s, tabId) === "chromium";
+  return !!t && engineProfile(s, t.profileId) === profile && webviews.get(tabId) === web && tabEngine(s, tabId) === engine;
 }
 
-async function copyCookies(tabId: string, url: string): Promise<number> {
+async function copyToWebKit(tabId: string, url: string): Promise<number> {
   const t = useBrowser.getState().tabs[tabId];
   const web = webviews.get(tabId);
   const urls = cookieAddresses(url);
   if (!t || !web || !urls.length) return 0;
   const profile = engineProfile(useBrowser.getState(), t.profileId);
-  if (!stillChromiumPage(tabId, profile, web)) return 0;
+  if (!stillPage(tabId, profile, web, "chromium")) return 0;
   const storeKey = await webKitCookieStoreKey(profile);
-  if (storeKey == null || !stillChromiumPage(tabId, profile, web)) return 0;
+  if (storeKey == null || !stillPage(tabId, profile, web, "chromium")) return 0;
   const cookies = carriableCookies(await web.pageCookies(urls), Date.now() / 1000);
-  if (!cookies.length || !stillChromiumPage(tabId, profile, web)) return 0;
+  if (!cookies.length || !stillPage(tabId, profile, web, "chromium")) return 0;
   return importWebKitCookies(profile, storeKey, cookies);
 }
 
-export function carrySignInToWebKit(tabId: string, url: string): Promise<number> {
-  if (!signInCarryOn()) return Promise.resolve(0);
-  return withDeadline(copyCookies(tabId, url).catch(() => 0), CARRY_DEADLINE_MS, 0);
+async function copyToChromium(tabId: string, url: string): Promise<number> {
+  const t = useBrowser.getState().tabs[tabId];
+  const web = webviews.get(tabId);
+  const urls = cookieAddresses(url);
+  if (!t || !web || !urls.length || isIncognitoProfile(t.profileId)) return 0;
+  const profile = engineProfile(useBrowser.getState(), t.profileId);
+  if (!stillPage(tabId, profile, web, "webkit")) return 0;
+  return exportWebKitCookies(profile, urls);
 }
+
+export function carrySignIn(tabId: string, url: string, to: PageEngine): Promise<number> {
+  const copy = to === "webkit" ? copyToWebKit(tabId, url) : copyToChromium(tabId, url);
+  return withDeadline(
+    copy.catch(() => 0).then((count) => (noteCookiesCarried(to, count), count)),
+    CARRY_DEADLINE_MS,
+    0,
+  );
+}
+
+export const carrySignInToWebKit = (tabId: string, url: string) => carrySignIn(tabId, url, "webkit");

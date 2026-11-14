@@ -43,7 +43,6 @@ export const PROTECTED_VIDEO_SITES: readonly string[] = [
   "hulu.com",
   "tv.apple.com",
   "music.apple.com",
-  "open.spotify.com",
   "peacocktv.com",
   "paramountplus.com",
   "crunchyroll.com",
@@ -97,13 +96,6 @@ export function typedNavigationEngine(s: EngineState, tab: Tab, url: string): Pa
   const chosen = chosenEngine(s, url);
   if (chosen) return chosen;
   return tab.url || navigationOf(tab) ? tabEngine(s, tab.id) : defaultEngine(s);
-}
-
-export function engineMark(s: EngineState, tabId: string): PageEngine | null {
-  const t = s.tabs[tabId];
-  if (!t || !canSwitchEngine(t.url || navigationOf(t)?.url)) return null;
-  const engine = tabEngine(s, tabId);
-  return engine === defaultEngine(s) ? null : engine;
 }
 
 export type WebKitPage = { url: string; title: string; isLoading: boolean; committedUrl: string };

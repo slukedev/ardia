@@ -30,6 +30,17 @@ extension WebKitTab {
     }
   }
 
+  @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+  func webViewRequestsLocation(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+    if LaunchConfig.shared.background {
+      NSLog("[webkit] location request (background mode, denied so macOS never asks)")
+      return decisionHandler(.deny)
+    }
+    WebKitHub.shared.permissions.request(browserId: browserId, tabId: transferKey, profile: profile, origin: Origins.of(origin), kinds: ["location"]) {
+      decisionHandler($0 ? .grant : .deny)
+    }
+  }
+
   func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo,
                completionHandler: @escaping () -> Void) {
     guard let window, !LaunchConfig.shared.background else { return completionHandler() }

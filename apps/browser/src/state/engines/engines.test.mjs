@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chosenEngine, engineForUrl, engineMark, protectedVideoSite, recommendedEngineFor, ruleFor, siteOf, tabEngine, typedNavigationEngine, visitRecorder } from "./engines.ts";
+import { chosenEngine, engineForUrl, protectedVideoSite, recommendedEngineFor, ruleFor, siteOf, tabEngine, typedNavigationEngine, visitRecorder } from "./engines.ts";
 import { makeTab, snapshotTab } from "../browser/model.ts";
 import { carriableCookies, cookieAddresses } from "./signInCookies.ts";
 
@@ -60,7 +60,7 @@ test("typing an address follows a rule, else keeps the page's engine", () => {
 test("streaming sites open in WebKit when the setting is on, over https, subdomains included", () => {
   assert.equal(protectedVideoSite("https://www.netflix.com/watch/1"), true);
   assert.equal(protectedVideoSite("https://netflix.com/"), true);
-  assert.equal(protectedVideoSite("https://open.spotify.com/track/1"), true);
+  assert.equal(protectedVideoSite("https://open.spotify.com/track/1"), false);
   assert.equal(protectedVideoSite("https://www.spotify.com/"), false);
   assert.equal(protectedVideoSite("https://netflix.com.example.com/"), false);
   assert.equal(protectedVideoSite("https://notnetflix.com/"), false);
@@ -90,13 +90,6 @@ test("Chromium's own pages always open in Chromium", () => {
   assert.equal(tabEngine(s, "v"), "chromium");
   assert.equal(typedNavigationEngine(s, s.tabs.w, "ardia://extensions"), "chromium");
   assert.equal(typedNavigationEngine(s, s.tabs.w, "chrome-extension://abc/options.html"), "chromium");
-});
-
-test("the mark shows only on web pages away from the default engine", () => {
-  const s = state([tab("w", { engine: "webkit", url: "https://a.com/" }), tab("c", { engine: "chromium", url: "https://a.com/" }), tab("n", { engine: "webkit", url: "ardia://history" })]);
-  assert.equal(engineMark(s, "w"), "webkit");
-  assert.equal(engineMark(s, "c"), null);
-  assert.equal(engineMark(s, "n"), null);
 });
 
 test("a closed WebKit tab reopens in WebKit, whatever restore id it carries", () => {

@@ -10,6 +10,8 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   let downloads = WebKitDownloads()
   let stores = WebKitStores()
   let transfers = WebKitTransfers()
+  let logins = WebKitLogins()
+  let notifications = WebKitNotifications()
   private(set) lazy var permissions = WebKitPermissions(stores: stores, transfers: transfers)
   private(set) lazy var externalApps = WebKitExternalApps(stores: stores)
   private var lastBrowserId: Int32 = -1000
@@ -76,11 +78,15 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     controller.addUserScript(WKUserScript(source: WebKitPageScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Self.world))
     controller.add(self, contentWorld: Self.world, name: "ardia")
     controller.addUserScript(WKUserScript(source: WebKitPageScript.mediaBridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    controller.addUserScript(WKUserScript(source: WebKitLogins.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world))
+    controller.addUserScript(WKUserScript(source: WebKitNotifications.worldBridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Self.world))
+    controller.addUserScript(WKUserScript(source: WebKitNotifications.pageShim, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
     if !Self.passkeysEntitled {
       controller.addUserScript(WKUserScript(source: Self.hidePasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
     }
     config.userContentController = controller
     WebKitContentBlocker.shared.attach(controller)
+    WebKitExtensions.shared.attach(config, profile: profile)
     config.applicationNameForUserAgent = "Version/\(Self.safariVersion) Safari/605.1.15"
     config.mediaTypesRequiringUserActionForPlayback = []
     config.allowsAirPlayForMediaPlayback = true
@@ -112,6 +118,12 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     webView.pauseAllMediaPlayback(completionHandler: {})
     webView.closeAllMediaPresentations(completionHandler: {})
     webView.removeFromSuperview()
+  }
+
+  func setZoom(_ zoom: Double, profile: String, host: String) {
+    guard zoom.isFinite, !host.isEmpty else { return }
+    let level = WebKitTab.zoomLevels.min { abs($0 - zoom) < abs($1 - zoom) } ?? 1
+    stores.setZoom(level, profile: profile, host: host)
   }
 
   func resumeHost(for profile: String) -> WKWebView {
@@ -166,6 +178,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     guard !WebKitStores.isPrivate(profile) else { return completion(true) }
     let identifier = WebKitStores.storeIdentifier(profile)
     let removed = stores.forgetProfile(profile)
+    WebKitExtensions.shared.forgetProfile(profile)
     downloads.cancelAll(profile: profile)
     if let host = stores.takeResumeHost(of: profile) { Self.close(host) }
     let removeStore = {

@@ -80,9 +80,7 @@ test("closing the tab a pending duplicate copies its engine from wakes the dupli
   useBrowser.setState((s) => ({ tabs: { ...s.tabs, [source]: { ...s.tabs[source], ...adopted("ardiacore:123") }, [copy]: { ...s.tabs[copy], ...adopted(`clone:${source}`) } } }));
   S().activate(other);
   const watch = watching(w);
-  const before = rowFlags(S(), w, copy);
   const woken = watch.run("close the source", () => S().closeTab(source));
-  assert.notEqual(rowFlags(S(), w, copy), before);
   assert.ok(woken.has(copy));
   watch.stop();
 });
