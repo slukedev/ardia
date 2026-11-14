@@ -93,7 +93,8 @@ const fromAdoption = (s: EngineState, t: Tab, depth: number): PageEngine | undef
   return source && depth < 8 ? engineOf(s, source, depth + 1) : undefined;
 };
 
-const drivenByChrome = (s: EngineState, t: Tab, depth: number): boolean => {
+export const drivenByChrome = (s: EngineState, t: Tab, depth = 0): boolean => {
+  if (t.chromeOpened) return true;
   const id = adoptKind(adoptOf(t));
   if (id?.kind === "tab") return true;
   const opener = id?.kind === "ardiacore" && t.openerId ? s.tabs[t.openerId] : undefined;

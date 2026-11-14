@@ -4,6 +4,7 @@ import WebKit
 
 final class WebKitHub: NSObject, WKScriptMessageHandler {
   static let shared = WebKitHub()
+  private(set) static var started = false
   static let world = WKContentWorld.world(name: "ardia")
   static let silenced = LaunchConfig.shared.background && !LaunchConfig.shared.instanceFlag("allowAudio")
 
@@ -15,6 +16,16 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   private(set) lazy var permissions = WebKitPermissions(stores: stores, transfers: transfers)
   private(set) lazy var externalApps = WebKitExternalApps(stores: stores)
   private var lastBrowserId: Int32 = -1000
+
+  override init() {
+    super.init()
+    Self.started = true
+  }
+
+  static func endPrivateSessionIfStarted(_ name: String) {
+    guard started else { return }
+    shared.endPrivateSession(name)
+  }
 
   func nextBrowserId() -> Int32 {
     lastBrowserId -= 1
@@ -147,6 +158,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   ])
 
   func clearBrowsingData(profile: String, types: [String], since: Double, completion: @escaping () -> Void) {
+    guard stores.hasStore(for: profile) else { return completion() }
     var kinds = Set<String>()
     if types.contains("siteData") { kinds.formUnion(Self.siteDataTypes) }
     if types.contains("cache") { kinds.formUnion([WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache]) }
@@ -161,6 +173,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   }
 
   func clearSiteData(profile: String, host rawHost: String, completion: @escaping ([String: Any]) -> Void) {
+    guard stores.hasStore(for: profile) else { return completion(["cookies": 0, "storage": true]) }
     let store = stores.dataStore(for: profile)
     let host = rawHost.lowercased()
     store.fetchDataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()) { records in

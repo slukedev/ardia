@@ -17,7 +17,7 @@ public class WebKitModule: Module {
       reply.ok(WebKitDownloads.removeStaging(try args.text("path")))
     },
     "endPrivateSession": { args, reply in
-      WebKitHub.shared.endPrivateSession(try args.text("session"))
+      WebKitHub.endPrivateSessionIfStarted(try args.text("session"))
       reply.ok()
     },
     "cookieStoreKey": { args, reply in reply.ok(WebKitHub.shared.stores.id(of: args.profile).wireKey) },

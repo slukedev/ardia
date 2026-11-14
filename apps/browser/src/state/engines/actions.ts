@@ -8,6 +8,7 @@ import {
   canSwitchEngine,
   chosenEngine,
   chromiumOnly,
+  drivenByChrome,
   ENGINE_NAMES,
   engineMode,
   engineUnderMode,
@@ -66,8 +67,11 @@ export function setWebsiteEngine(url: string, engine: PageEngine | null) {
 }
 
 export function persistEngine(tabId: string, engine: PageEngine) {
-  const t = store().tabs[tabId];
-  if (t && !t.engine) store().updateTab(tabId, { engine });
+  const s = store();
+  const t = s.tabs[tabId];
+  if (!t) return;
+  const opened = engine === "chromium" && !t.chromeOpened && drivenByChrome(s, t);
+  if (!t.engine || opened) s.updateTab(tabId, { ...(t.engine ? {} : { engine }), ...(opened ? { chromeOpened: true as const } : {}) });
 }
 
 async function mayLeavePage(t: Tab, title: string, message: string, confirmTitle: string): Promise<boolean> {

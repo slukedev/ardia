@@ -163,3 +163,58 @@ test("in WebKit only, a link from a website into the Web Store moves to Chromium
   assert.equal(useRetiringPages.getState()[tabId], undefined);
   webviews.clear();
 });
+
+const { persistEngine } = await import("./actions.ts");
+const { flushPersistence, loadSession, startPersistence } = await import("../session/persist.ts");
+const stub = await import("../../test-native/index.ts");
+
+function chromeMadeTab() {
+  const w = S().createWindow({ url: "https://first.example/" });
+  const tabId = model.activeTabId(S(), w);
+  S().updateTab(tabId, { url: "https://cli.example/", page: { kind: "adopted", adopt: "tab:42", nav: null } });
+  persistEngine(tabId, "chromium");
+  return tabId;
+}
+
+test("in WebKit only, a tab Chrome opened (CDP or an extension) wakes from sleep and comes back after relaunch in Chromium", () => {
+  stub.docs.clear();
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const stop = startPersistence();
+  const tabId = chromeMadeTab();
+  assert.equal(S().tabs[tabId].chromeOpened, true);
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  S().updateTab(tabId, { page: { kind: "asleep" } });
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  flushPersistence();
+  stop();
+  S().hydrate(loadSession());
+  assert.equal(S().tabs[tabId].chromeOpened, true);
+  assert.equal(S().tabs[tabId].page.kind === "adopted", false);
+  assert.equal(tabEngine(S(), tabId), "chromium");
+});
+
+test("a page opened by a Chrome-opened tab is marked too, and typing an address in either moves it to WebKit", () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const opener = chromeMadeTab();
+  const w = S().tabs[opener].windowId;
+  const popup = S().newTab(w, { url: "https://popup.example/", adoptId: "ardiacore:5", openerId: opener });
+  persistEngine(popup, "chromium");
+  assert.equal(S().tabs[popup].chromeOpened, true);
+  S().updateTab(popup, { page: { kind: "asleep" }, openerId: null });
+  assert.equal(tabEngine(S(), popup), "chromium");
+  S().navigate(opener, "https://typed.example/", { userInitiated: true });
+  assert.equal(S().tabs[opener].chromeOpened, undefined);
+  assert.equal(tabEngine(S(), opener), "webkit");
+});
+
+test("a tab the app opened is never marked as Chrome's", () => {
+  S().hydrate({});
+  const w = S().createWindow({ url: "https://mine.example/" });
+  const tabId = model.activeTabId(S(), w);
+  persistEngine(tabId, "chromium");
+  assert.equal(S().tabs[tabId].chromeOpened, undefined);
+  S().updateSettings({ engineMode: "webkit" });
+  assert.equal(tabEngine(S(), tabId), "webkit");
+});

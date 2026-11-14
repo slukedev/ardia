@@ -185,7 +185,9 @@ export const createTabsSlice: StateCreator<BrowserState, [], [], TabsSlice> = (s
     const switching = !!engine && engine !== tabEngine(s, id);
     if (!switching) startNavigation(id, navigation);
     const page = switching ? loadedPage(navigation) : renavigated(tab, navigation);
-    set(apply(base, { tabs: { ...base.tabs, [id]: { ...tab, openerId: base.tabs[id]!.openerId, page, url: tab.url || url, ...(engine ? { engine } : {}) } } }));
+    const { chromeOpened: _, ...typed } = tab;
+    const navigated = userInitiated ? typed : tab;
+    set(apply(base, { tabs: { ...base.tabs, [id]: { ...navigated, openerId: base.tabs[id]!.openerId, page, url: tab.url || url, ...(engine ? { engine } : {}) } } }));
     const ui = get().windowUi[tab.windowId];
     if (ui?.panel.open) get().closePanel(tab.windowId);
   },
