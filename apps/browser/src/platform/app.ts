@@ -19,10 +19,11 @@ export type { OpenURLSource };
 
 export { replyToTerminate } from "./windows";
 
-export { WIDEVINE_COMPONENT_ID } from "@ardia/ardiacore";
+export { WIDEVINE_COMPONENT_ID, type EngineComponent } from "@ardia/ardiacore";
 
 export const engineInfo = () => call("engine.info");
 export const listComponents = () => call("engine.components");
+export const updateComponent = (id: string) => call("engine.updateComponent", { id });
 
 const Shell = nativeModule("ArdiaShell");
 const App = nativeModule("ArdiaApp");

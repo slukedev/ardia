@@ -979,14 +979,20 @@
       const GRACE_MS = 5000;
       const KEYS_GRACE_MS = 2000;
       const MEDIA_ERR_DECODE = 3;
+      const MEDIA_ERR_ENCRYPTED = 5;
+      const decryptFailure = /decrypt|cdm|licen[cs]e|key/i;
+      const failedKeyStatus = /^(output-restricted|internal-error)$/;
       let drmSent = false;
       let refused = "";
+      let refusedStage = "";
       const attempted = new Set();
       const grantedOnActivation = new WeakSet();
-      const needsProtectedPlayback = (keySystem) => {
+      const protectedKeys = new WeakMap();
+      const protectedSessions = new WeakMap();
+      const needsProtectedPlayback = (keySystem, stage) => {
         if (drmSent) return;
         drmSent = true;
-        send("drm", { keySystem });
+        send("drm", { keySystem, stage });
       };
       const progressed = (m) => m.readyState >= 2 && m.currentTime > 0;
       const anyProgressed = () => [...attempted, ...document.querySelectorAll("video, audio")].some(progressed);
@@ -994,7 +1000,7 @@
       const stalled = (m) => !m.paused && !m.ended && !progressed(m);
       const judgeAttempt = (m) =>
         after(GRACE_MS, () => {
-          if (refused && stalled(m)) needsProtectedPlayback(refused);
+          if (refused && stalled(m)) needsProtectedPlayback(refused, refusedStage);
         });
       const onAttempt = (m) => {
         if (attempted.size >= 16) attempted.delete(attempted.values().next().value);
@@ -1003,27 +1009,39 @@
       };
       const onNeedsKey = (m) =>
         after(KEYS_GRACE_MS, () => {
-          if (!m.mediaKeys && !progressed(m)) needsProtectedPlayback(refused);
+          if (!m.mediaKeys && !progressed(m)) needsProtectedPlayback(refused, refusedStage || "access");
         });
+      const keysOf = (m) => (m.mediaKeys ? protectedKeys.get(m.mediaKeys) : undefined);
+      const failedDecrypt = (error) =>
+        error.code === MEDIA_ERR_ENCRYPTED || (error.code === MEDIA_ERR_DECODE && typeof error.message === "string" && apply(test, decryptFailure, [error.message]));
+      const onMediaError = (m) => {
+        if (!m.error) return;
+        if (refused && m.error.code === MEDIA_ERR_DECODE) return needsProtectedPlayback(refused, refusedStage);
+        const keys = keysOf(m);
+        if (keys && failedDecrypt(m.error)) needsProtectedPlayback(keys.keySystem, "licence");
+      };
       const onDrmMediaEvent = (e) => {
         const m = e.target;
         if (drmSent || !(m instanceof HTMLMediaElement)) return;
         if (e.type === "play") onAttempt(m);
         else if (e.type === "encrypted" || e.type === "waitingforkey") onNeedsKey(m);
-        else if (e.type === "error" && refused && m.error && m.error.code === MEDIA_ERR_DECODE) needsProtectedPlayback(refused);
+        else if (e.type === "error") onMediaError(m);
       };
       const drmMediaEvents = ["play", "encrypted", "waitingforkey", "error"];
       for (const type of drmMediaEvents) document.addEventListener(type, guard(onDrmMediaEvent), true);
       detachedMediaWatchers.push((m) => {
         for (const type of drmMediaEvents) m.addEventListener(type, guard(onDrmMediaEvent));
       });
-      const onRefused = (keySystem, activated) => {
+      const onRefused = (keySystem, activated, stage) => {
         if (drmSent) return;
-        if (!refused) refused = keySystem;
+        if (!refused || (refusedStage === "access" && stage !== "access")) {
+          refused = keySystem;
+          refusedStage = stage;
+        }
         for (const m of attempted) if (stalled(m)) judgeAttempt(m);
         if (activated)
           after(GRACE_MS, () => {
-            if (!anyProgressed()) needsProtectedPlayback(keySystem);
+            if (!anyProgressed()) needsProtectedPlayback(keySystem, stage);
           });
       };
       const wrapped = asNative(requestAccess, (target, self, args) => {
@@ -1032,7 +1050,7 @@
         if (!drmSent && typeof keySystem === "string" && apply(test, protectedSystem, [keySystem])) {
           const activated = !!(navigator.userActivation && navigator.userActivation.isActive);
           const remember = guard((access) => activated && access && typeof access === "object" && grantedOnActivation.add(access));
-          apply(then, result, [remember, () => onRefused(keySystem, activated)]);
+          apply(then, result, [remember, () => onRefused(keySystem, activated, "access")]);
         }
         return result;
       });
@@ -1051,7 +1069,8 @@
             const keySystem = keySystemFrom(self);
             if (typeof keySystem === "string" && apply(test, protectedSystem, [keySystem])) {
               const activated = !!(navigator.userActivation && navigator.userActivation.isActive) || grantedOnActivation.has(self);
-              apply(then, result, [null, () => onRefused(keySystem, activated)]);
+              const rememberKeys = guard((keys) => keys && typeof keys === "object" && protectedKeys.set(keys, { keySystem, activated }));
+              apply(then, result, [rememberKeys, () => onRefused(keySystem, activated, "createMediaKeys")]);
             }
           }
           return result;
@@ -1060,6 +1079,51 @@
           ...Object.getOwnPropertyDescriptor(AccessType.prototype, "createMediaKeys"),
           value: wrappedCreate,
         });
+        const KeysType = window.MediaKeys;
+        const SessionType = window.MediaKeySession;
+        const createSession = KeysType && KeysType.prototype.createSession;
+        const updateSession = SessionType && SessionType.prototype.update;
+        const keyStatusesOf = SessionType && Object.getOwnPropertyDescriptor(SessionType.prototype, "keyStatuses");
+        const StatusMap = window.MediaKeyStatusMap;
+        const eachStatus = StatusMap && StatusMap.prototype.forEach;
+        const listenOn = window.EventTarget && window.EventTarget.prototype.addEventListener;
+        if (typeof createSession === "function" && typeof updateSession === "function") {
+          const onSessionFailed = (session, stage) => {
+            const keys = protectedSessions.get(session);
+            if (keys) onRefused(keys.keySystem, keys.activated, stage);
+          };
+          const onKeyStatuses = guard((e) => {
+            const session = e.target;
+            if (drmSent || !protectedSessions.has(session)) return;
+            const statuses = apply(keyStatusesOf.get, session, []);
+            let failed = false;
+            apply(eachStatus, statuses, [(status) => (failed = failed || (typeof status === "string" && apply(test, failedKeyStatus, [status])))]);
+            if (failed) onSessionFailed(session, "keystatus");
+          });
+          const watchesStatuses = keyStatusesOf && typeof keyStatusesOf.get === "function" && typeof eachStatus === "function" && typeof listenOn === "function";
+          const wrappedSession = asNative(createSession, (target, self, args) => {
+            const session = apply(target, self, args);
+            const keys = protectedKeys.get(self);
+            if (keys && session && typeof session === "object") {
+              protectedSessions.set(session, keys);
+              if (watchesStatuses) apply(listenOn, session, ["keystatuseschange", onKeyStatuses]);
+            }
+            return session;
+          });
+          const wrappedUpdate = asNative(updateSession, (target, self, args) => {
+            const result = apply(target, self, args);
+            if (!drmSent && protectedSessions.has(self)) apply(then, result, [null, guard(() => onSessionFailed(self, "licence"))]);
+            return result;
+          });
+          Object.defineProperty(KeysType.prototype, "createSession", {
+            ...Object.getOwnPropertyDescriptor(KeysType.prototype, "createSession"),
+            value: wrappedSession,
+          });
+          Object.defineProperty(SessionType.prototype, "update", {
+            ...Object.getOwnPropertyDescriptor(SessionType.prototype, "update"),
+            value: wrappedUpdate,
+          });
+        }
       }
     }
   } catch (e) {}

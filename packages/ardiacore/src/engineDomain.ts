@@ -45,6 +45,13 @@ export type SystemState = {
 
 export const WIDEVINE_COMPONENT_ID = "oimompecagnajdejgnnjijobebaeigek";
 
+export type ComponentUpdateError =
+  | "notAllowed" | "noUpdater" | "notRegistered" | "noUpdate" | "inProgress" | "canceled" | "retryLater" | "service"
+  | "updateCheck" | "notFound" | "invalidArgument" | "disabled" | "download" | "unpack" | "install" | "installer"
+  | "unknown";
+
+export type ComponentUpdateResult = { ok: boolean; error?: ComponentUpdateError };
+
 export type BatterySaverMode = "on" | "off" | "default";
 
 export type BatterySaverState = { state: number; active: boolean };

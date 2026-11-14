@@ -48,6 +48,7 @@ import { noteAutoPictureInPictureKept, notePageOverlay, noteReopenedPage, noteWe
 import { isAdoptKind } from "../../state/tabs/adoptIds";
 import { firstPagePending, isBlankAddress, noteFirstPagePending, reportedAddress, reportedTitle } from "../../state/tabs/pendingAddress";
 import { STATUS_FLIP_BAND } from "./tokens";
+import { noteProtectedVideoRefusal } from "../../state/telemetry/protectedVideoCounts";
 
 const webViewTab = (t: Tab | undefined) => ({ navigation: navigationOf(t), adoptId: adoptOf(t), profileId: t?.profileId ?? "", shownUrl: t?.url ?? "" });
 
@@ -271,7 +272,10 @@ function EngineWebView({ tabId, visible, warm, peekOf, engine }: TabWebViewProps
       }}
       onSelection={(selection) => setPageSelection(tabId, selection)}
       onScroll={(state) => noteScroll(tabId, state)}
-      onProtectedMedia={(request) => offerWebKit(tabId, request)}
+      onProtectedMedia={(request) => {
+        if (engine === "chromium") noteProtectedVideoRefusal(request);
+        offerWebKit(tabId, request);
+      }}
       onNotificationClose={closeWebNotification}
       onDiscarded={(url, reason) => {
         releaseTranslation(tabId);

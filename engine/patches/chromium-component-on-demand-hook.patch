@@ -1,0 +1,21 @@
+--- a/components/component_updater/component_updater_service.h
++++ b/components/component_updater/component_updater_service.h
+@@ -24,6 +24,10 @@
+ class ComponentsHandler;
+ class PluginObserver;
+ 
++namespace ardia {
++class ComponentOnDemandUpdate;
++}
++
+ namespace ash {
+ class SmartDimComponentIntegrationTest;
+ }
+@@ -228,6 +232,7 @@
+ 
+  private:
+   friend class OnDemandTester;
++  friend class ::ardia::ComponentOnDemandUpdate;
+   friend class policy::ComponentUpdaterPolicyTest;
+   friend class ::ComponentsHandler;
+   friend class OnDeviceModelUpdater;

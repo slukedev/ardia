@@ -24,6 +24,13 @@ public class EngineModule: Module {
   static let calls = CallTable(domain: "engine", handlers: [
     "info": { _, reply in reply.ok(ArdiaHost.engineInfo) },
     "components": { _, reply in ArdiaServices.components { reply.service($0, $1) } },
+    "updateComponent": { args, reply in
+      let id = try args.text("id")
+      guard let data = try? JSONSerialization.data(withJSONObject: ["id": id]), let json = String(data: data, encoding: .utf8) else {
+        return reply.fail("ERR_BAD_ARGS", "engine.updateComponent: the arguments aren't JSON")
+      }
+      ArdiaEngineBridge.call("ac_component_update", profile: "", args: json) { reply.componentUpdate($0) }
+    },
     "tasks": { _, reply in ArdiaServices.tasks { reply.service($0, $1) } },
     "beginTracing": { _, reply in ArdiaHost.beginTracing { reply.ok($0) } },
     "endTracing": { args, reply in ArdiaHost.endTracing(keep: try args.bool("keep")) { reply.ok($0) } },
@@ -59,4 +66,12 @@ public class EngineModule: Module {
       EngineCall.passing("ac_cli_control", profile: args.profile, args: ["active": active], reply: reply)
     },
   ])
+}
+
+private extension CallReply {
+  func componentUpdate(_ json: String) {
+    let reply = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any]
+    if reply?["ok"] is Bool { return promise.resolve(json) }
+    fail("ERR_ENGINE", (reply?["error"] as? String) ?? "the engine's reply isn't JSON")
+  }
 }

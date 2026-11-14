@@ -158,7 +158,7 @@ export type ExtensionActionResult = "none" | "popup" | "sidePanel";
 
 export type PageSelection = { text: string; rect: { x: number; y: number; width: number; height: number } };
 export type ScrollState = "down" | "up" | "top";
-export type ProtectedMediaRequest = { keySystem: string; main: boolean };
+export type ProtectedMediaRequest = { keySystem: string; main: boolean; stage?: "access" | "createMediaKeys" | "licence" | "keystatus" };
 
 export type WebViewProps = ViewProps & {
   engine?: PageEngine;

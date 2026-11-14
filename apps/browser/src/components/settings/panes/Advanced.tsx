@@ -12,7 +12,8 @@ import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/s
 import { Button, DialogActions, DialogTitle, lineHeight, PopUp, Sheet, space, Text, TextField, Toggle } from "../../ui";
 import { Favicon } from "../../favicon/Favicon";
 import { FormField, Group, Row, SectionHeader, SettingToggle } from "../Form";
-import { engineVersion, widevine as widevineComponent } from "../../../state/settings/paneData";
+import { engineVersion, installWidevine, useWidevineInstall, widevine as widevineComponent } from "../../../state/settings/paneData";
+import { widevineDownloading, widevineVersion } from "../../../state/settings/widevine";
 import { useResource } from "../../../state/settings/resources";
 import { AutomationRules } from "./AutomationRules";
 
@@ -38,8 +39,6 @@ export function AdvancedPane() {
   const keepActiveSites = useSettings((s) => s.keepActiveSites);
   const warnBeforeMovingTabs = useSettings((s) => s.warnBeforeMovingTabsToProfile);
   const [info] = useResource(engineVersion);
-  const [widevine] = useResource(widevineComponent);
-  const widevineVersion = widevine && widevine.version !== "0.0.0.0" ? widevine.version : null;
 
   return (
     <View>
@@ -102,16 +101,7 @@ export function AdvancedPane() {
             {info?.chromiumVersion ?? "…"}
           </Text>
         </Row>
-        <Row
-          anchor="advanced.widevine"
-          description={
-            widevine === undefined
-              ? "Checking…"
-              : widevineVersion
-                ? `Version ${widevineVersion}`
-                : "Not available in this build: video that needs it, like Netflix or Disney+, won't play."
-          }
-        />
+        <WidevineRow />
       </Group>
 
       <SectionHeader title="Source and licenses" />
@@ -124,6 +114,34 @@ export function AdvancedPane() {
         </Row>
       </Group>
     </View>
+  );
+}
+
+function WidevineRow() {
+  const [component] = useResource(widevineComponent);
+  const phase = useWidevineInstall((s) => s.phase);
+  const version = widevineVersion(component);
+  const installing = phase === "installing" || widevineDownloading(component);
+  const failed = phase === "failed" && !version;
+  return (
+    <Row
+      anchor="advanced.widevine"
+      description={
+        failed ? (
+          <Text size="caption" tone="destructive" style={INSTALL_NOTE}>
+            Couldn't download Widevine; check your connection and try again.
+          </Text>
+        ) : undefined
+      }
+    >
+      {version ? (
+        <Text selectable tone="textSecondary">
+          {version}
+        </Text>
+      ) : component === undefined ? null : (
+        <Button title={installing ? "Installing…" : failed ? "Try Again" : "Install"} disabled={installing} onPress={() => void installWidevine()} />
+      )}
+    </Row>
   );
 }
 

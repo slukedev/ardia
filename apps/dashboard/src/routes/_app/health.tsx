@@ -26,6 +26,7 @@ function HealthPage() {
   const range = useRange();
   const health = useSection("health");
   const cli = useSection("health.cli");
+  const protectedVideo = useSection("health.protectedVideo");
   return (
     <>
       <PageHeader
@@ -49,6 +50,15 @@ function HealthPage() {
       <Panel source="app" title="Crash signatures" description="Grouped by exception type and the first frames of ours (in-app, innermost first; unresolved addresses shown as module +?). JS errors are grouped by message. Click a row for its stack.">
         <Loaded query={health} skeleton={<TableSkeleton rows={8} columns={6} />}>
           {(h) => <Signatures h={h} />}
+        </Loaded>
+      </Panel>
+      <Panel
+        source="app"
+        title="Protected video"
+        description="Widevine in Chromium tabs. Installed: share of installs whose latest daily snapshot has the CDM. Refusals: protected playback that failed and offered WebKit, by the step it stopped at; licence and key status are sites that need VMP."
+      >
+        <Loaded query={protectedVideo} skeleton={<TableSkeleton rows={4} columns={7} />}>
+          {(p) => <ProtectedVideo p={p} />}
         </Loaded>
       </Panel>
       <Panel
@@ -267,6 +277,41 @@ function CliHealth({ c }: { c: Cli }) {
           { key: "failed", header: "Failed", align: "right", sort: (r) => r.failed, cell: (r) => (r.failed ? <span className="font-medium text-bad">{formatExact(r.failed)}</span> : <span className="text-muted-foreground">0</span>) },
           { key: "people", header: "People", align: "right", sort: (r) => r.people, cell: (r) => formatExact(r.people) },
           { key: "last", header: "Last", align: "right", sort: (r) => r.lastSeen, cell: (r) => <span className="whitespace-nowrap text-muted-foreground">{formatAgo(r.lastSeen)}</span> },
+        ]}
+      />
+    </div>
+  );
+}
+
+type ProtectedVideoData = SectionData<"health.protectedVideo">;
+
+const quiet = (n: number) => (n ? formatExact(n) : <span className="text-muted-foreground">0</span>);
+
+function ProtectedVideo({ p }: { p: ProtectedVideoData }) {
+  const t = p.total;
+  return (
+    <div className="grid gap-5">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4">
+        <Stat source="app" label="CDM installed" value={formatPercent(p.cdmShare)} sub={`${formatExact(p.cdmInstalled)} of ${formatExact(p.cdmReported)} installs`} />
+        <Stat source="app" label="Installs" value={formatPercent(t?.successRate ?? null)} sub={`${formatExact(t?.successes ?? 0)} worked, ${formatExact(t?.failures ?? 0)} failed`} />
+        <Stat source="app" label="Refusals" value={formatExact(t?.refusals ?? 0)} sub={`${formatExact((t?.licence ?? 0) + (t?.keystatus ?? 0))} need VMP`} />
+        <Stat source="app" label="Keys refused" value={formatExact(t?.createKeys ?? 0)} sub="CDM didn't load" />
+      </div>
+      <DataTable
+        dense
+        rows={p.versions}
+        rowKey={(r) => r.version}
+        limit={8}
+        empty="No Widevine installs or refusals in this range"
+        columns={[
+          { key: "version", header: "Version", sort: (r) => r.version, cell: (r) => <span className="font-mono text-[12px] whitespace-nowrap">{r.version}</span> },
+          { key: "people", header: "People", align: "right", sort: (r) => r.people, cell: (r) => formatExact(r.people) },
+          { key: "installs", header: "Installs", align: "right", sort: (r) => r.attempts, cell: (r) => (r.failures ? <span className="font-medium text-bad">{formatExact(r.successes)} / {formatExact(r.attempts)}</span> : quiet(r.attempts)) },
+          { key: "access", header: "Access", align: "right", sort: (r) => r.access, cell: (r) => quiet(r.access) },
+          { key: "keys", header: "Keys", align: "right", sort: (r) => r.createKeys, cell: (r) => quiet(r.createKeys) },
+          { key: "licence", header: "Licence", align: "right", sort: (r) => r.licence, cell: (r) => quiet(r.licence) },
+          { key: "keystatus", header: "Key status", align: "right", sort: (r) => r.keystatus, cell: (r) => quiet(r.keystatus) },
+          { key: "unstaged", header: "No stage", align: "right", sort: (r) => r.unstaged, cell: (r) => quiet(r.unstaged) },
         ]}
       />
     </div>

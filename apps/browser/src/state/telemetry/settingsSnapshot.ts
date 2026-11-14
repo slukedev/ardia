@@ -1,5 +1,7 @@
 import { SETTING_SPECS, type Settings, type SettingSpec } from "../settings/settings";
 import { commandBarStartFlags } from "../omnibox/commandBarStart";
+import type { EngineComponent } from "../../platform/app";
+import { widevineOf, widevineVersion } from "../settings/widevine";
 
 export const SETTINGS_SNAPSHOT_EVENT = "settings_snapshot";
 
@@ -37,3 +39,6 @@ export const appIconSetting = (icon: string | null): Record<string, string> =>
 export const customColorProfiles = (profiles: Record<string, { theme?: unknown }>): Record<string, string> => ({
   custom_color_profiles: String(Object.values(profiles).filter((profile) => !!profile.theme).length),
 });
+
+export const widevineSetting = (components: EngineComponent[] | null): Record<string, string> =>
+  components ? { setting_widevine_installed: widevineVersion(widevineOf(components)) ? "true" : "false", default_widevine_installed: "true" } : {};

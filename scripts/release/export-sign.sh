@@ -48,6 +48,7 @@ for helper in "$fwv"/Helpers/*.app; do
   case "$(basename "$helper")" in
     *"Renderer).app") sign_as "$identity" --options restrict,kill,runtime --entitlements "$entitlements_dir/renderer.entitlements" "$helper" ;;
     *"GPU).app") sign_as "$identity" --options restrict,kill,runtime --entitlements "$entitlements_dir/gpu.entitlements" "$helper" ;;
+    *" Helper.app") sign_as "$identity" --options restrict,kill,runtime --entitlements "$entitlements_dir/utility.entitlements" "$helper" ;;
     *) sign_as "$identity" --options restrict,library,kill,runtime "$helper" ;;
   esac
 done

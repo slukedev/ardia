@@ -21,6 +21,7 @@ if ! [[ -f "$stamp" && "$(cat "$stamp")" == "$want" && -d "$frameworks/Chromium 
       case "$(basename "$helper")" in
         *"Renderer).app") sign --options runtime --entitlements "$here/signing/renderer.entitlements" "$helper" ;;
         *"GPU).app") sign --options runtime --entitlements "$here/signing/gpu.entitlements" "$helper" ;;
+        *" Helper.app") sign --options runtime --entitlements "$here/signing/utility.entitlements" "$helper" ;;
         *) sign --options runtime "$helper" ;;
       esac
     done

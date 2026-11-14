@@ -13,6 +13,7 @@
 #include "base/system/sys_info.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/performance_manager/public/user_tuning/battery_saver_mode_manager.h"
 #include "chrome/browser/task_manager/providers/task.h"
@@ -28,6 +29,7 @@
 #include "components/sessions/core/session_id.h"
 #include "components/update_client/crx_update_item.h"
 #include "components/update_client/update_client.h"
+#include "components/update_client/update_client_errors.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace ardia {
@@ -208,6 +210,122 @@ AC_ARGS_CALL(ac_battery_saver) {
   out.Send(base::DictValue()
                .Set("state", local_state->GetInteger(pref))
                .Set("active", manager && manager->IsBatterySaverActive()));
+}
+
+namespace ardia {
+
+class ComponentOnDemandUpdate {
+ public:
+  static void Start(component_updater::ComponentUpdateService& updater,
+                    const std::string& id,
+                    component_updater::Callback callback) {
+    updater.GetOnDemandUpdater().OnDemandUpdate(
+        id, component_updater::OnDemandUpdater::Priority::FOREGROUND,
+        std::move(callback));
+  }
+};
+
+namespace {
+
+constexpr char kWidevineComponentId[] = "oimompecagnajdejgnnjijobebaeigek";
+
+const char* UpdateErrorName(update_client::Error error) {
+  using update_client::Error;
+  switch (error) {
+    case Error::NONE:
+      return "none";
+    case Error::UPDATE_IN_PROGRESS:
+      return "inProgress";
+    case Error::UPDATE_CANCELED:
+      return "canceled";
+    case Error::RETRY_LATER:
+      return "retryLater";
+    case Error::SERVICE_ERROR:
+      return "service";
+    case Error::UPDATE_CHECK_ERROR:
+      return "updateCheck";
+    case Error::CRX_NOT_FOUND:
+      return "notFound";
+    case Error::INVALID_ARGUMENT:
+      return "invalidArgument";
+    case Error::BAD_CRX_DATA_CALLBACK:
+      return "notAllowed";
+    case Error::UPDATE_DISABLED:
+      return "disabled";
+  }
+  return "unknown";
+}
+
+const char* ErrorCategoryName(update_client::ErrorCategory category) {
+  using update_client::ErrorCategory;
+  switch (category) {
+    case ErrorCategory::kNone:
+      return "none";
+    case ErrorCategory::kDownload:
+      return "download";
+    case ErrorCategory::kUnpack:
+      return "unpack";
+    case ErrorCategory::kInstall:
+      return "install";
+    case ErrorCategory::kService:
+      return "service";
+    case ErrorCategory::kUpdateCheck:
+      return "updateCheck";
+    case ErrorCategory::kInstaller:
+      return "installer";
+  }
+  return "unknown";
+}
+
+void ReplyWithUpdateResult(Reply out,
+                           const std::string& id,
+                           update_client::Error error) {
+  if (error != update_client::Error::NONE) {
+    return out.Send(base::DictValue()
+                        .Set("ok", false)
+                        .Set("error", UpdateErrorName(error)));
+  }
+  component_updater::ComponentUpdateService* updater =
+      g_browser_process ? g_browser_process->component_updater() : nullptr;
+  update_client::CrxUpdateItem item;
+  if (!updater || !updater->GetComponentDetails(id, &item)) {
+    return out.Send(
+        base::DictValue().Set("ok", false).Set("error", "notRegistered"));
+  }
+  if (item.state == update_client::ComponentState::kUpdateError) {
+    return out.Send(base::DictValue()
+                        .Set("ok", false)
+                        .Set("error", ErrorCategoryName(item.error_category)));
+  }
+  for (const component_updater::ComponentInfo& info :
+       updater->GetComponents()) {
+    if (info.id == id && info.version.IsValid() &&
+        info.version > base::Version("0.0.0.0")) {
+      return out.Send(base::DictValue().Set("ok", true));
+    }
+  }
+  out.Send(base::DictValue().Set("ok", false).Set("error", "noUpdate"));
+}
+
+}
+}
+
+AC_ARGS_CALL(ac_component_update) {
+  ardia::Reply out = call.TakeReply();
+  const std::string id = call.String("id");
+  if (id != ardia::kWidevineComponentId) {
+    return out.Send(
+        base::DictValue().Set("ok", false).Set("error", "notAllowed"));
+  }
+  component_updater::ComponentUpdateService* updater =
+      g_browser_process ? g_browser_process->component_updater() : nullptr;
+  if (!updater) {
+    return out.Send(
+        base::DictValue().Set("ok", false).Set("error", "noUpdater"));
+  }
+  ardia::ComponentOnDemandUpdate::Start(
+      *updater, id,
+      base::BindOnce(&ardia::ReplyWithUpdateResult, std::move(out), id));
 }
 
 AC_ARGS_CALL(ac_components_list) {

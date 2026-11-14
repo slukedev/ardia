@@ -2,6 +2,7 @@ import { useBrowser } from "../browser/store";
 import {
   engineInfo,
   listComponents,
+  updateComponent,
   WIDEVINE_COMPONENT_ID,
   appIcons,
   currentAppIcon,
@@ -32,6 +33,9 @@ import { cached, load, loadAll, need, resource, store, useAllLoaded, type Needed
 import type { SettingsPane } from "./settingsWindows";
 import { FOLLOW_EVERY_MS, FOLLOW_FOR_MS, switchOutcome, updaterBusy } from "./updateStatus";
 import { noteUpdateChannelSwitch } from "../telemetry/usage";
+import { noteWidevineInstall } from "../telemetry/protectedVideoCounts";
+import { create } from "zustand";
+import { widevineDownloading, widevineOf, widevineVersion } from "./widevine";
 
 export const APP_ICON_SIZE = 56;
 
@@ -61,12 +65,35 @@ export const shortcutItems = resource("menuShortcuts", () =>
   ),
 );
 export const engineVersion = resource("engineInfo", () => engineInfo().catch(() => null));
-export const widevine = resource("widevine", () =>
-  listComponents().then(
-    (list) => list.find((c) => c.id === WIDEVINE_COMPONENT_ID) ?? null,
-    () => null,
-  ),
-);
+export const widevine = resource("widevine", () => listComponents().then(widevineOf, () => null));
+
+const WIDEVINE_FOLLOW_EVERY_MS = 1000;
+const WIDEVINE_FOLLOW_FOR_MS = 90_000;
+
+export const useWidevineInstall = create<{ phase: "idle" | "installing" | "failed" }>()(() => ({ phase: "idle" }));
+
+async function followWidevine(finished: boolean): Promise<boolean> {
+  const until = Date.now() + WIDEVINE_FOLLOW_FOR_MS;
+  let downloaded = finished;
+  for (;;) {
+    const component = await load(widevine, [], { fresh: true });
+    if (widevineVersion(component)) return true;
+    downloaded ||= widevineDownloading(component);
+    if ((downloaded && component?.state === "updateError") || Date.now() >= until) return false;
+    await new Promise<void>((done) => setTimeout(done, WIDEVINE_FOLLOW_EVERY_MS));
+  }
+}
+
+export async function installWidevine() {
+  if (useWidevineInstall.getState().phase === "installing") return;
+  useWidevineInstall.setState({ phase: "installing" });
+  noteWidevineInstall("attempt");
+  const result = await updateComponent(WIDEVINE_COMPONENT_ID).catch(() => null);
+  const started = !!result && (result.ok || result.error === "inProgress");
+  const installed = started && (await followWidevine(result.ok).catch(() => false));
+  noteWidevineInstall(installed ? "success" : "failure");
+  useWidevineInstall.setState({ phase: installed ? "idle" : "failed" });
+}
 
 const defaultProfile = () => engineProfile(useBrowser.getState(), currentSettings().defaultProfileId);
 

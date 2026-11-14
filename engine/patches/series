@@ -35,6 +35,7 @@ chromium chromium-extension-install-prompt-hook.patch
 chromium chromium-webstore-direct.patch
 chromium chromium-extension-updates.patch
 chromium chromium-component-updater-security-only.patch
+chromium chromium-component-on-demand-hook.patch
 chromium chromium-extension-omaha-attributes.patch
 chromium chromium-extension-management-policy-hook.patch
 chromium chromium-extension-sync-installer-hook.patch

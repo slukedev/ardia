@@ -60,7 +60,7 @@
  
  #if BUILDFLAG(IS_WIN)
  #include "base/enterprise_util.h"
-@@ -62,26 +70,100 @@
+@@ -62,26 +70,101 @@
  namespace component_updater {
  namespace {
  
@@ -77,6 +77,7 @@
 +constexpr char kComponentDownloadDomain[] = "gvt1.com";
 +constexpr char kComponentDownloadMirrorHost[] = "www.google.com";
 +constexpr char kComponentDownloadMirrorPathPrefix[] = "/dl/";
++constexpr char kChromeProdId[] = "chrome";
 +
 +constexpr std::string_view kRequestKeysSent[] = {
 +    "@os",         "@updater",       "acceptformat",  "apps",
@@ -174,7 +175,7 @@
  class ChromeConfigurator : public update_client::Configurator {
   public:
    ChromeConfigurator(const base::CommandLine* cmdline,
-@@ -128,8 +210,6 @@
+@@ -128,8 +211,6 @@
  
    ~ChromeConfigurator() override = default;
  
@@ -183,7 +184,7 @@
    SEQUENCE_CHECKER(sequence_checker_);
    ConfiguratorImpl configurator_impl_;
    raw_ptr<PrefService, LeakedDanglingUntriaged> pref_service_;
-@@ -185,12 +265,12 @@
+@@ -185,18 +266,17 @@
  
  std::vector<GURL> ChromeConfigurator::UpdateUrl() const {
    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -198,6 +199,13 @@
  }
  
  std::string ChromeConfigurator::GetProdId() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  return update_client::UpdateQueryParams::GetProdIdString(
+-      update_client::UpdateQueryParams::ProdId::CHROME);
++  return kChromeProdId;
+ }
+ 
+ base::Version ChromeConfigurator::GetBrowserVersion() const {
 @@ -252,7 +332,8 @@
              g_browser_process->system_network_context_manager()
                  ->GetSharedURLLoaderFactory(),
@@ -412,7 +420,7 @@
    }
  
    // Use the configurator implementation to test the filtering of
-@@ -149,6 +226,66 @@
+@@ -149,13 +226,71 @@
    }
  }
  
@@ -479,6 +487,14 @@
  TEST_F(ChromeComponentUpdaterConfiguratorTest, TestProdId) {
    base::CommandLine cmdline(*base::CommandLine::ForCurrentProcess());
    const auto config(
+       MakeChromeComponentUpdaterConfigurator(&cmdline, pref_service()));
+-  EXPECT_STREQ(update_client::UpdateQueryParams::GetProdIdString(
+-                   update_client::UpdateQueryParams::ProdId::CHROME),
+-               config->GetProdId().c_str());
++  EXPECT_EQ("chrome", config->GetProdId());
+ }
+ 
+ }  // namespace component_updater
 --- a/components/component_updater/component_updater_service.cc
 +++ b/components/component_updater/component_updater_service.cc
 @@ -11,10 +11,12 @@
@@ -494,7 +510,7 @@
  #include "base/files/file_path.h"
  #include "base/functional/bind.h"
  #include "base/functional/callback.h"
-@@ -53,6 +55,13 @@
+@@ -53,6 +55,14 @@
    UPDATE_TYPE_AUTOMATIC,
    UPDATE_TYPE_COUNT,
  };
@@ -504,11 +520,12 @@
 +        "efniojlnjndmcbiieegkicadnoecjjef",
 +        "giekcmmlnklenlaomppkphknjmnnpneh",
 +        "hfnkpimlhhgieaddgfemjhofmfblmnib",
++        "oimompecagnajdejgnnjijobebaeigek",
 +    });
  
  }  // namespace
  
-@@ -516,8 +525,9 @@
+@@ -516,8 +526,9 @@
    std::vector<std::optional<CrxComponent>> crxs;
    for (std::optional<ComponentRegistration> item :
         component_updater::GetCrxComponents(components_, ids)) {
@@ -530,13 +547,13 @@
  #include "base/test/metrics/histogram_tester.h"
  #include "base/test/task_environment.h"
  #include "base/test/test_future.h"
-@@ -755,6 +756,59 @@
+@@ -755,6 +756,62 @@
  
    EXPECT_TRUE(component_updater().GetComponentDetails(id, &item));
    EXPECT_TRUE(item.component);
 +}
 +
-+TEST_F(ComponentUpdaterTest, OnlySecurityComponentsReachUpdateClient) {
++TEST_F(ComponentUpdaterTest, OnlyAllowlistedComponentsReachUpdateClient) {
 +  ON_CALL(scheduler(), Schedule(_, _, _, _)).WillByDefault(Return());
 +  EXPECT_CALL(scheduler(), Schedule(_, _, _, _));
 +  EXPECT_CALL(update_client(), Stop());
@@ -545,10 +562,11 @@
 +  const std::string crl_set = "hfnkpimlhhgieaddgfemjhofmfblmnib";
 +  const std::string pki_metadata = "efniojlnjndmcbiieegkicadnoecjjef";
 +  const std::string ssl_error_assistant = "giekcmmlnklenlaomppkphknjmnnpneh";
++  const std::string widevine = "oimompecagnajdejgnnjijobebaeigek";
 +  const std::string denied = "jebgalgnebhfojomionfpkfelancnnkf";
 +  const std::string unregistered = "ihfokbkgjpifnbbojhneepfflplebdkc";
 +  for (const std::string& id :
-+       {crl_set, denied, pki_metadata, ssl_error_assistant}) {
++       {crl_set, denied, pki_metadata, ssl_error_assistant, widevine}) {
 +    ASSERT_TRUE(component_updater().RegisterComponent(ComponentRegistration(
 +        id, {}, base::ToVector(update_client::jebg_hash), base::Version("1.0"),
 +        {}, {}, nullptr, base::MakeRefCounted<MockInstaller>(), false, true,
@@ -564,7 +582,7 @@
 +        crx_data_callback = std::move(callback);
 +      });
 +  OnDemandTester tester;
-+  tester.OnDemand(&component_updater(), denied,
++  tester.OnDemand(&component_updater(), widevine,
 +                  OnDemandUpdater::Priority::FOREGROUND);
 +  ASSERT_TRUE(crx_data_callback);
 +
@@ -572,12 +590,12 @@
 +  std::move(crx_data_callback)
 +      .Run(
 +          {denied, crl_set, unregistered, pki_metadata, denied,
-+           ssl_error_assistant},
++           ssl_error_assistant, widevine},
 +          base::BindLambdaForTesting(
 +              [&](const std::vector<std::optional<update_client::CrxComponent>>&
 +                      result) { crxs = result; }));
 +
-+  ASSERT_EQ(6u, crxs.size());
++  ASSERT_EQ(7u, crxs.size());
 +  EXPECT_FALSE(crxs[0]);
 +  ASSERT_TRUE(crxs[1]);
 +  EXPECT_EQ(crl_set, crxs[1]->app_id);
@@ -587,6 +605,8 @@
 +  EXPECT_FALSE(crxs[4]);
 +  ASSERT_TRUE(crxs[5]);
 +  EXPECT_EQ(ssl_error_assistant, crxs[5]->app_id);
++  ASSERT_TRUE(crxs[6]);
++  EXPECT_EQ(widevine, crxs[6]->app_id);
  }
  
  }  // namespace component_updater

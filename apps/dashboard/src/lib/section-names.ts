@@ -9,6 +9,7 @@ export const SECTION_NAMES = [
   "funnels.retention",
   "health",
   "health.cli",
+  "health.protectedVideo",
   "performance",
   "settings",
   "settings.tint",
