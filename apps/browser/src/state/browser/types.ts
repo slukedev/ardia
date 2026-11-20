@@ -68,6 +68,7 @@ export type Tab = {
   liveItem?: { folderId: string; itemId: string; completed?: true };
   pinKey?: string;
   engine?: PageEngine;
+  chromeOpened?: true;
   createdAt: number;
   lastActiveAt: number;
   restoredAt?: number;

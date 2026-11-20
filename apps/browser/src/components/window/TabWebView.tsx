@@ -16,6 +16,10 @@ import { opaqueCard } from "../ui/opaqueCard";
 import { handOff, takeHandOff, wantsPage } from "../../state/tabs/tabPages";
 import { noteDiscarded, noteGone, noteReady } from "../../state/tabs/tabLifecycle";
 import { noteWebKitPage, offerWebKit, persistEngine } from "../../state/engines/actions";
+import { heldBySwap, watchFirstPaint } from "../../state/engines/engineSwap";
+import { useRetiringEngine } from "../../state/engines/hooks";
+import { noteProtectedVideoRefusal } from "../../state/telemetry/protectedVideoCounts";
+import { consentToken } from "../../state/telemetry/client";
 import { webviewRef, webviews } from "../../state/tabs/webviewHandles";
 import { noteIssued, takeStartedNavigation } from "../../state/tabs/earlyNavigate";
 import { currentEngineProfile, currentTab, isTabSilenced } from "../../state/browser/current";
@@ -62,12 +66,27 @@ const webViewTab = (t: Tab | undefined) => ({ navigation: navigationOf(t), adopt
 
 type TabWebViewProps = { tabId: string; visible: boolean; selected?: boolean; warm: boolean; peekOf?: string };
 
+const ARRIVING = [StyleSheet.absoluteFill, { opacity: 0 }];
+
 export const TabWebView = memo(function TabWebView(props: TabWebViewProps) {
   const engine = useTabEngine(props.tabId);
-  return <EngineWebView key={engine} engine={engine} {...props} />;
+  const retiring = useRetiringEngine(props.tabId, engine);
+  const shown = useRef(engine);
+  const holding = useRef<PageEngine | null>(null);
+  if (shown.current !== engine) {
+    const leavingUnpainted = holding.current !== null;
+    holding.current = retiring === shown.current && props.visible && !leavingUnpainted ? retiring : null;
+    shown.current = engine;
+  }
+  if (holding.current && (retiring !== holding.current || !props.visible)) holding.current = null;
+  const held = holding.current;
+  const live = <EngineWebView key={engine} engine={engine} arriving={!!held} {...props} />;
+  if (!held) return live;
+  const old = <EngineWebView key={held} engine={held} retired {...props} />;
+  return held === "chromium" ? [old, live] : [live, old];
 });
 
-function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }: TabWebViewProps & { engine: PageEngine }) {
+function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine, retired = false, arriving = false }: TabWebViewProps & { engine: PageEngine; retired?: boolean; arriving?: boolean }) {
   const asPeek = peekOf !== undefined;
   const isDonor = () => asPeek && promotedFromPeek(tabId);
   const handedToTab = () => isDonor() && peekDonorTaken(tabId);
@@ -94,7 +113,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
   const arrived = useRef(!!handoff && (handoff.seq === navigation?.seq || isBlankAddress(navigation?.url ?? "")));
   const loadsOnCreate = useRef(engine === "webkit" && !handoff ? navigation?.seq : undefined);
   useEffect(() => {
-    if (!navigation || isDonor()) return;
+    if (!navigation || retired || isDonor()) return;
     noteIssued(tabId, navigation.seq);
     if (arrived.current) {
       arrived.current = false;
@@ -117,6 +136,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
   useEffect(() => {
     persistEngine(tabId, engine);
     return () => {
+      if (wentRetired.current) return;
       if (handedToTab()) return forgetPeekHandover(tabId);
       noteGone(tabId);
       endThemeHold(tabId);
@@ -130,9 +150,20 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
     if (waitsOffScreen) noteWebKitPageKeptHidden();
   }, [waitsOffScreen]);
   const mountedProfile = useRef(profileId);
+  const wentRetired = useRef(false);
+  useLayoutEffect(() => {
+    const revived = wentRetired.current && !retired;
+    wentRetired.current = retired;
+    if (revived) watchFirstPaint(tabId, engine, visible);
+    if (!retired) return;
+    setPageProgress(tabId, 0);
+    pageEnded(tabId);
+    noteGone(tabId);
+    noteFirstPagePending(tabId, false);
+  }, [retired]);
   useLayoutEffect(
     () => () => {
-      if (handedToTab()) return;
+      if (wentRetired.current || handedToTab()) return;
       const t = tab();
       const sameEngine = currentTabEngine(tabId) === engine;
       if (wantsPage(t) && sameEngine && currentEngineProfile(t.profileId) === currentEngineProfile(mountedProfile.current) && !isQuitting()) handOff(tabId, currentEngineProfile(t.profileId), engine);
@@ -153,9 +184,10 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
 
   return (
     <WebView
-      ref={ref}
+      ref={retired ? undefined : ref}
       engine={engine}
-      style={StyleSheet.absoluteFill}
+      retired={retired}
+      style={arriving ? ARRIVING : StyleSheet.absoluteFill}
       url={navigation?.url ?? (adoptId ? tab()?.url : undefined)}
       profile={currentEngineProfile(profileId)}
       adoptId={adoptId}
@@ -176,6 +208,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
         noteTabReady(tabId);
         noteReady(tabId);
         void webviews.get(tabId)?.setMuted(isTabSilenced(tabId));
+        watchFirstPaint(tabId, engine, visible);
       }}
       onNavigationChange={({ url: reported, title: reportedPageTitle, canGoBack, canGoForward, isLoading, themeColor, themeColorSource, initialDocumentAccessed, committedInitial, committedUrl, committedAt, httpStatus }) => {
         noteCommit(tabId, committedUrl, committedAt, httpStatus);
@@ -199,7 +232,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
         const restoring = restore.current !== null;
         if (target !== null && isBlankAddress(url) && !target.startsWith("about:") && untouched) {
           noteFirstPagePending(tabId, true);
-          updateLive(tabId, { isLoading: true });
+          if (!heldBySwap(tabId, { isLoading: true })) updateLive(tabId, { isLoading: true });
           return;
         }
         noteFirstPagePending(tabId, firstPagePending({ url, committedInitial, isLoading }));
@@ -215,8 +248,9 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
           patchPage(tabId, { newTabShown: null });
         }
         if (fromNewTab.current && url && !isBlankAddress(url)) patchPage(tabId, { backToNewTab: true });
-        const shownTitle = !title && restoring ? (tab()?.title ?? title) : title;
-        updateTab(tabId, { url, title: shownTitle }, { isLoading, canGoBack, canGoForward, themeColor: shownTheme });
+        const held = heldBySwap(tabId, { isLoading });
+        const shownTitle = !title && (restoring || held) ? (tab()?.title ?? title) : title;
+        updateTab(tabId, { url, title: shownTitle }, { isLoading: isLoading && !held, canGoBack, canGoForward, themeColor: shownTheme });
         dropOutlivedFavicon(tabId, url, isLoading);
         if (engine === "webkit") noteWebKitPage(tabId, { url, title, isLoading, committedUrl: committedUrl ?? "" });
         if (lastPage.current !== null && withoutFragment(url) !== lastPage.current) leftPage(tabId, url, lastPage.current, engine, peekOf !== undefined);
@@ -230,7 +264,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
         pending.current = null;
         downloadNavigated(tabId, committedUrl, skipped);
       }}
-      onProgress={(progress) => !prewarmOnly() && setPageProgress(tabId, progress)}
+      onProgress={(progress) => !prewarmOnly() && !heldBySwap(tabId, { progress }) && setPageProgress(tabId, progress)}
       onZoom={({ zoom, user }) => {
         updateTab(tabId, { zoom });
         if (user) zoomChangedByUser(tabId);
@@ -308,7 +342,10 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       }}
       onSelection={(selection) => setPageSelection(tabId, selection)}
       onScroll={(state) => noteScroll(tabId, state)}
-      onProtectedMedia={(request) => offerWebKit(tabId, request)}
+      onProtectedMedia={(request) => {
+        if (engine === "chromium") noteProtectedVideoRefusal(request, consentToken());
+        offerWebKit(tabId, request);
+      }}
       onAutoplayBlocked={(count) => noteSiteControls("autoplayPlaysBlocked", count)}
       onFieldProviderOpened={(opened: FieldProviderOpened) => fieldProviderOpened(tabId, opened)}
       onFieldProviderHint={(hint: FieldProviderHint) => fieldProviderHint(tabId, hint)}

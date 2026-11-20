@@ -23,6 +23,8 @@ const TOP = [
   ["tint", ["appearance.glassTint", "appearance.glassTint"]],
   ["default browser", ["general.defaultBrowser"]],
   ["search engine", ["profiles.searchEngine"]],
+  ["webkit only", ["general.engineMode"]],
+  ["chromium only", ["general.engineMode"]],
   ["ad block", ["general.blockAds"]],
   ["adblock", ["general.blockAds"]],
   ["block ads", ["general.blockAds"]],
@@ -123,6 +125,10 @@ const TOP = [
   ["thme", ["appearance.theme"]],
   ["upscalling", ["tabs.videoUpscaling"]],
   ["extensoins", ["profiles.extensions", "profiles.webStore"]],
+  ["unsaved", ["advanced.engineSwitchAsksAboutUnsavedWork"]],
+  ["seamless", ["advanced.engineSwitchKeepsPage"]],
+  ["drm prompt", ["advanced.offerWebKitForProtectedVideo"]],
+  ["webkit limitations", ["advanced.enginesDiffer", "general.engineMode"]],
 ];
 
 test("real queries put the setting people mean first", () => {
@@ -309,6 +315,12 @@ test("a row its pane doesn't draw is left out of search, by the same rule the pa
   assert.ok(unshown({}, { top: false }).has("profiles.profileDownloadsFolder"));
   assert.ok(unshown({ addressBar: "sidebar" }, { top: false }).has("appearance.compactToolbar"));
   assert.ok(!unshown({ addressBar: "sidebar" }, { top: true }).has("appearance.compactToolbar"));
+  const chromiumOnly = unshown({ engineMode: "chromium" }, { top: false });
+  for (const id of ["advanced.pageEngine", "advanced.websiteEngines", "advanced.enginesDiffer", "advanced.offerWebKitForProtectedVideo"]) assert.ok(chromiumOnly.has(id), id);
+  for (const id of ["general.engineMode", "advanced.engineSwitchKeepsPage", "advanced.engineSwitchAsksAboutUnsavedWork"]) assert.ok(!chromiumOnly.has(id), id);
+  const webkitOnly = unshown({ engineMode: "webkit" }, { top: false });
+  for (const id of ["advanced.pageEngine", "advanced.websiteEngines", "advanced.offerWebKitForProtectedVideo"]) assert.ok(webkitOnly.has(id), id);
+  for (const id of ["general.engineMode", "advanced.enginesDiffer"]) assert.ok(!webkitOnly.has(id), id);
 });
 
 const SHOWN_BY_LOADED_DATA = ["UpdatesSection.tsx: general.autoUpdate", "UpdatesSection.tsx: general.updateChannel"];

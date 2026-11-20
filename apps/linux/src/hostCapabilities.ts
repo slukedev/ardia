@@ -82,7 +82,15 @@ export function linuxCapabilities(host: ArdiaHost | undefined = ardiaHost): Linu
   };
 }
 
-export const WEB_ENGINE_SETTINGS = ["advanced.pageEngine", "advanced.websiteEngines"] as const;
+export const WEB_ENGINE_SETTINGS = [
+  "general.engineMode",
+  "advanced.pageEngine",
+  "advanced.websiteEngines",
+  "advanced.offerWebKitForProtectedVideo",
+  "advanced.engineSwitchKeepsPage",
+  "advanced.engineSwitchAsksAboutUnsavedWork",
+  "advanced.enginesDiffer",
+] as const;
 
 export function unavailableSettingIds(capabilities: LinuxCapabilities, settingIds: readonly string[]): Set<string> {
   const ids = new Set<string>();

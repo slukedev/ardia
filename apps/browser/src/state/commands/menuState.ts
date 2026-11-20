@@ -3,7 +3,7 @@ import { engineBookmarkRoots, folderChildren, isBookmarked, isWithin, ROOT_TITLE
 import type { BrowserState } from "../browser/store";
 import { changedIds } from "../browser/changes";
 import { activeTab, bookmarkProfileId, engineProfile, IDLE_LIVE, isPinnedRow, tabLabel, togglePinTitle, windowTitle, tabLayoutOf, tabsShownIn } from "../browser/model";
-import { canSwitchEngine, tabEngine } from "../engines/engines";
+import { switchableEngine, tabEngine } from "../engines/engines";
 import { readerState as readerFor, type ReaderState } from "../reader/reader";
 import { peekTabId } from "../peek/peek";
 import { canHideElements } from "../site/hiddenElements";
@@ -104,7 +104,7 @@ export function menuState(s: BrowserState, liveOfTab = (id: string) => shownLive
   else disabled.push("togglePin:tile");
   if (page) titles.toggleMute = muteTitle(muteState(s, page));
   if (page && tabEngine(s, page.id) === "webkit") titles.togglePageEngine = "Open Page in Chromium";
-  if (!canSwitchEngine(page?.url)) disabled.push("togglePageEngine");
+  if (!switchableEngine(s, page?.url)) disabled.push("togglePageEngine");
   const reader = page ? readerFor(page.id) : undefined;
   if (reader?.active) titles.toggleReader = "Hide Reader";
   if (!reader?.active && !reader?.available) disabled.push("toggleReader");

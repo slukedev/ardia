@@ -202,6 +202,7 @@ export function startDevHarness() {
       const { WhatsSentSheet } = require("../settings/panes/ShareDiagnostics") as typeof import("../settings/panes/ShareDiagnostics");
       showSettingsSheet(createElement(WhatsSentSheet));
     },
+    showWebKitLimits: () => (require("../settings/panes/WebKitLimitsSheet") as typeof import("../settings/panes/WebKitLimitsSheet")).showWebKitLimits("engineRow"),
     showFilterLists: () => {
       const { showSettingsSheet } = require("../../state/settings/sheet") as typeof import("../../state/settings/sheet");
       const { FilterListsSheet } = require("../settings/panes/FilterListsSheet") as typeof import("../settings/panes/FilterListsSheet");
@@ -242,6 +243,9 @@ export function startDevHarness() {
     },
     get freezes(): typeof import("../../state/telemetry/freezes") & typeof import("../../state/telemetry/freezeRecords") {
       return { ...require("../../state/telemetry/freezes"), ...require("../../state/telemetry/freezeRecords") };
+    },
+    get engineSwap(): typeof import("../../state/engines/engineSwap") {
+      return require("../../state/engines/engineSwap");
     },
   };
   (globalThis as { ac?: typeof ac }).ac = ac;

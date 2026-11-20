@@ -5,3 +5,10 @@ export type SettingRow = { title: string; description?: string; explained?: bool
 export type SettingSection = { section: string; rows: Record<string, SettingRow> };
 
 export const APP = "Ardia";
+
+export const WEBKIT_LIMITS_KEYWORDS = ["webkit limitations", "limitations", "not supported", "unsupported", "passkeys", "security keys", "picture in picture", "client hints", "midi", "casting", "chromecast", "chrome.debugger", "webrequest", "removeparam", "about engines", "how automatic works"];
+
+export const ENGINE_MODE_ROW = {
+  title: "Engine",
+  keywords: ["engine mode", "only", "just", "chromium only", "webkit only", "safari", "automatic", "always"],
+} satisfies SettingRow;

@@ -1,4 +1,4 @@
-import { APP, type SettingsEnv, type SettingSection } from "./types";
+import { APP, ENGINE_MODE_ROW, WEBKIT_LIMITS_KEYWORDS, type SettingsEnv, type SettingSection } from "./types";
 import type { SettingsPane } from "../../../state/settings/settingsWindows";
 import { keyText } from "../../../state/commands/keyText";
 import { PLATFORM_FEATURES } from "../../../lib/platformFeatures";
@@ -37,6 +37,12 @@ export const generalRows = {
           description: "Ardia asks before doing any of these.",
           keywords: ["quit", "confirm", "cmd q", "last window", "exit", "warn before quitting", "close window", "warn before closing a window with multiple tabs", "close tab", "warn before closing last tab in a profile", "close group", "folder", "accidentally", "warn before closing a tab group", "warn before moving tabs between profiles", "warn", "last tab", "move tab"],
         },
+      },
+    },
+    {
+      section: "Web engine",
+      rows: {
+        engineMode: { ...ENGINE_MODE_ROW, keywords: [...ENGINE_MODE_ROW.keywords, ...WEBKIT_LIMITS_KEYWORDS], shown: () => PLATFORM_FEATURES.webKit },
       },
     },
     {
@@ -135,7 +141,7 @@ export const generalRows = {
         },
         version: {
           title: "Version",
-          keywords: ["version", "update", "about", "check for updates now", "engine", "ardiacore", "chromium", "drm", "netflix", "disney", "widevine (protected video)", "github", "open source", "gpl", "license", "source code", "credits", "legal", "licenses", "check for updates", "chromium version", "widevine"],
+          keywords: ["version", "update", "about", "check for updates now", "engine", "ardiacore", "chromium", "drm", "netflix", "disney", "github", "open source", "gpl", "license", "source code", "credits", "legal", "licenses", "check for updates", "chromium version", "widevine"],
         },
       },
     },

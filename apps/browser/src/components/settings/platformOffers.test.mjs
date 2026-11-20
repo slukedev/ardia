@@ -90,7 +90,7 @@ test("the Mac keeps every row and the engine switch", () => {
 });
 
 const PANES_DIR = new URL("./panes/", import.meta.url);
-const HIDDEN_ON_WINDOWS = new Set(["CalendarSection.tsx", "WebEngineSection.tsx", "HiddenElementsSection.tsx", "PasskeyAccessRow.tsx", "PasswordManagerPlugin.tsx"]);
+const HIDDEN_ON_WINDOWS = new Set(["CalendarSection.tsx", "WebEngineSection.tsx", "EngineModeRow.tsx", "HiddenElementsSection.tsx", "PasskeyAccessRow.tsx", "PasswordManagerPlugin.tsx", "WebKitLimitsSheet.tsx"]);
 const MAC_ONLY_STATES = [["General.tsx", "requiresApproval"], ["General.tsx", 'title="Content blocking"']];
 const MAC_WORDS = /macOS|Touch ID|Keychain|this Mac|their Mac|View ›|Apple silicon|System Settings/;
 

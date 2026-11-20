@@ -54,6 +54,8 @@ export const settingsType = {
   get code() { return display.code; },
 } as const;
 
+export const aboutEngines = { labelWidth: 176 } as const;
+
 export const settingsMotion = {
   searchFlashIn: duration.fast,
   searchFlashHold: 900,

@@ -6,7 +6,7 @@ import { openUrls } from "../../../state/browser/actions";
 import { ActivitySpinner, Button, lineHeight, Segmented, space, Text, Toggle } from "../../ui";
 import { perLook } from "../../ui/tokens";
 import { SHARING_COPY } from "../../../state/telemetry/copy";
-import { engineVersion, followUpdater, setUpdaterPrefs, updater, widevine as widevineComponent } from "../../../state/settings/paneData";
+import { engineVersion, followUpdater, setUpdaterPrefs, updater } from "../../../state/settings/paneData";
 import { checkNowControl, switchCheckLine, updaterBusy } from "../../../state/settings/updateStatus";
 import { useResource } from "../../../state/settings/resources";
 import { UI_LOCALE } from "../../../lib/uiLocale";
@@ -76,9 +76,7 @@ export function UpdatesSection() {
 
 function VersionDetails({ status }: { status: string | null }) {
   const [info] = useResource(engineVersion);
-  const [widevine] = useResource(widevineComponent);
-  const widevineVersion = widevine && widevine.version !== "0.0.0.0" ? widevine.version : null;
-  const engines = [`Chromium ${info?.chromiumVersion ?? "…"}`, widevine === undefined ? "Widevine checking…" : widevineVersion ? `Widevine ${widevineVersion}` : null].filter(Boolean).join(" · ");
+  const engines = `Chromium ${info?.chromiumVersion ?? "…"}`;
   return (
     <View>
       {status ? (
@@ -89,11 +87,6 @@ function VersionDetails({ status }: { status: string | null }) {
       <Text selectable size="caption" tone="textSecondary" style={DETAIL()}>
         {engines}
       </Text>
-      {widevine !== undefined && !widevineVersion ? (
-        <Text size="caption" tone="textSecondary" style={DETAIL()}>
-          Widevine isn't available in this build: video that needs it, like Netflix or Disney+, won't play.
-        </Text>
-      ) : null}
       <View style={LINKS}>
         <Button variant="text" look="link" pad="none" title="Source code" onPress={() => openUrls([`${REPOSITORY}/tree/v${systemInfo().appVersion}`])} />
         <Button variant="text" look="link" pad="none" title="Licenses" onPress={() => openUrls(["chrome://credits"])} />

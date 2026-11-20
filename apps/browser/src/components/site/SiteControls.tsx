@@ -14,7 +14,7 @@ import { currentEngineProfile } from "../../state/browser/current";
 import { useMuteState } from "../../state/tabs/hooks";
 import { openFind } from "../../state/find/actions";
 import { updateSettings } from "../../state/settings/actions";
-import { useEngineRule, usePageEngine, useRecommendedEngine, useStreamingSite } from "../../state/engines/hooks";
+import { useCanSwitchEngine, useEngineRule, usePageEngine, useRecommendedEngine, useStreamingSite } from "../../state/engines/hooks";
 import { useSettings, useTab } from "../../state/browser/hooks";
 import { isIncognitoProfile, tabLabel } from "../../state/browser/model";
 import { ENGINE_NAMES, ENGINE_SYMBOLS, offersEngineChoice, otherEngine } from "../../state/engines/engines";
@@ -88,6 +88,7 @@ export function SiteControlsPanel({
   const engineRule = useEngineRule(url);
   const recommendedEngine = useRecommendedEngine(url);
   const streamingSite = useStreamingSite(url);
+  const switchable = useCanSwitchEngine(url);
   const recommendedTitle = streamingSite ? `Recommended (${ENGINE_NAMES[recommendedEngine]})` : `Default (${ENGINE_NAMES[recommendedEngine]})`;
 
   useEffect(() => {
@@ -235,7 +236,7 @@ export function SiteControlsPanel({
             {DEVELOPER_BAR_IN_CORE && canChooseDeveloperMode(url) && !privatePage ? (
               <SettingRow icon="hammer" title="Developer Mode" value={developerMode ? "On" : "Off"} on={developerMode} onPress={() => setDeveloperMode(url, !developerMode)} />
             ) : null}
-            {engineChoice ? <SettingRow icon={ENGINE_SYMBOLS[pageEngine]} title="Opens in" value={opensIn} on={!!engineRule} onPress={() => void pickEngine()} /> : null}
+            {engineChoice && switchable ? <SettingRow icon={ENGINE_SYMBOLS[pageEngine]} title="Opens in" value={opensIn} on={!!engineRule} onPress={() => void pickEngine()} /> : null}
             {shownPermissions.map((p) => (
               <SettingRow
                 key={p.type}
@@ -267,7 +268,7 @@ export function SiteControlsPanel({
             <MenuSeparator />
             <MenuRow icon="plus.magnifyingglass" title="Zoom" accessory={<ZoomStepper tabId={tabId} zoom={tab.zoom} />} />
             {origin && !castTile ? <MenuRow icon="tv.and.mediabox" title="Cast…" onPress={cast} /> : null}
-            {engineChoice && origin ? (
+            {engineChoice && origin && switchable ? (
               <MenuRow
                 icon={ENGINE_SYMBOLS[otherEngine(pageEngine)]}
                 title={`Open Page in ${ENGINE_NAMES[otherEngine(pageEngine)]}`}

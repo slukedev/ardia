@@ -22,8 +22,37 @@ class HTMLMediaElement {
   }
 }
 
-function page(supported, { keyless = null } = {}) {
+class MediaKeyStatusMap {
+  #statuses;
+  constructor(statuses) {
+    this.#statuses = statuses;
+  }
+  forEach(fn) {
+    for (const [keyId, status] of this.#statuses) fn(status, keyId, this);
+  }
+}
+
+function page(supported, { keyless = null, cdm = null } = {}) {
+  if (cdm) keyless ??= [];
   const sent = [];
+  class MediaKeySession extends EventTarget {
+    statuses = new Map();
+    get keyStatuses() {
+      return new MediaKeyStatusMap(this.statuses);
+    }
+    update(response) {
+      return cdm.licence === "rejected" ? Promise.reject(new Error("license request failed")) : Promise.resolve();
+    }
+    showStatus(status) {
+      this.statuses.set("key", status);
+      this.dispatchEvent(new Event("keystatuseschange"));
+    }
+  }
+  class MediaKeys {
+    createSession() {
+      return new MediaKeySession();
+    }
+  }
   const timers = [];
   let now = 0;
   const inDocument = [];
@@ -41,7 +70,7 @@ function page(supported, { keyless = null } = {}) {
     value: {
       createMediaKeys() {
         if (!(this instanceof MediaKeySystemAccess)) return Promise.reject(new TypeError("Illegal invocation"));
-        return keyless.includes(this.keySystem) ? Promise.reject(new Error("NotSupportedError")) : Promise.resolve({});
+        return keyless.includes(this.keySystem) ? Promise.reject(new Error("NotSupportedError")) : Promise.resolve(cdm ? new MediaKeys() : {});
       },
     }.createMediaKeys,
     writable: true,
@@ -75,7 +104,8 @@ function page(supported, { keyless = null } = {}) {
     };
   const detachedMediaWatchers = [];
   const run = new Function("window", "apply", "asNative", "send", "document", "navigator", "HTMLMediaElement", "setTimeout", "guard", "detachedMediaWatchers", source);
-  run(keyless ? { Navigator, MediaKeySystemAccess } : { Navigator }, Reflect.apply, asNative, (kind, data) => sent.push({ kind, data }), document, navigator, HTMLMediaElement, setTimeout, guard, detachedMediaWatchers);
+  const window = cdm ? { Navigator, MediaKeySystemAccess, MediaKeys, MediaKeySession, MediaKeyStatusMap, EventTarget } : keyless ? { Navigator, MediaKeySystemAccess } : { Navigator };
+  run(window, Reflect.apply, asNative, (kind, data) => sent.push({ kind, data }), document, navigator, HTMLMediaElement, setTimeout, guard, detachedMediaWatchers);
   const advance = (ms) => {
     now += ms;
     for (let due; (due = timers.filter((t) => t.at <= now).sort((a, b) => a.at - b.at)[0]); ) {
@@ -103,11 +133,13 @@ function page(supported, { keyless = null } = {}) {
     await assert.rejects(navigator.requestMediaKeySystemAccess(keySystem, []));
     await settle();
   };
-  return { navigator, Navigator, MediaKeySystemAccess, sent, advance, fire, fireDetached, addMedia, detachedPlay, refuse };
+  const keysFor = async (keySystem = "com.widevine.alpha") => (await navigator.requestMediaKeySystemAccess(keySystem, [])).createMediaKeys();
+  const sessionFor = async (keySystem) => (await keysFor(keySystem)).createSession();
+  return { navigator, Navigator, MediaKeySystemAccess, MediaKeys, MediaKeySession, sent, advance, fire, fireDetached, addMedia, detachedPlay, refuse, keysFor, sessionFor };
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
-const drm = (keySystem = "com.widevine.alpha") => [{ kind: "drm", data: { keySystem } }];
+const drm = (keySystem = "com.widevine.alpha", stage = "access") => [{ kind: "drm", data: { keySystem, stage } }];
 
 test("a refused capability check alone never prompts, with or without media on the page", async () => {
   const p = page(["org.w3.clearkey"]);
@@ -225,7 +257,7 @@ test("media that's encrypted and still has no keys prompts, media that got keys 
   const locked = p.addMedia({ paused: false, readyState: 1 });
   p.fire(locked, "waitingforkey");
   p.advance(2000);
-  assert.deepEqual(p.sent, [{ kind: "drm", data: { keySystem: "" } }]);
+  assert.deepEqual(p.sent, drm(""));
 });
 
 test("a decode error after a refusal prompts, one before any refusal doesn't", async () => {
@@ -275,7 +307,7 @@ test("an access whose keys can't be created counts as a refusal, so stalled play
   p.advance(4999);
   assert.deepEqual(p.sent, []);
   p.advance(1);
-  assert.deepEqual(p.sent, drm());
+  assert.deepEqual(p.sent, drm("com.widevine.alpha", "createMediaKeys"));
 });
 
 test("keys refused after the click's activation expired still prompt when the access was requested during that click", async () => {
@@ -288,7 +320,7 @@ test("keys refused after the click's activation expired still prompt when the ac
   p.advance(4999);
   assert.deepEqual(p.sent, []);
   p.advance(1);
-  assert.deepEqual(p.sent, drm());
+  assert.deepEqual(p.sent, drm("com.widevine.alpha", "createMediaKeys"));
 });
 
 test("keys refused for an access requested without activation stay quiet without a stalled play", async () => {
@@ -316,4 +348,123 @@ test("keys that are created, Clear Key's refused keys and a wrong receiver keep 
   assert.equal(descriptor.value.name, "createMediaKeys");
   assert.equal(descriptor.value.length, 0);
   assert.equal(Function.prototype.toString.call(descriptor.value), "function () { [native code] }");
+});
+
+test("a licence the CDM's server refuses counts as a refusal once playback stalls, and the page still sees its rejection", async () => {
+  const p = page(["com.widevine.alpha"], { cdm: { licence: "rejected" } });
+  const session = await p.sessionFor();
+  await assert.rejects(session.update(new Uint8Array()), /license request failed/);
+  await settle();
+  p.advance(10000);
+  assert.deepEqual(p.sent, []);
+  const video = p.addMedia({ paused: false, readyState: 1, mediaKeys: {} });
+  p.fire(video, "play");
+  p.advance(4999);
+  assert.deepEqual(p.sent, []);
+  p.advance(1);
+  assert.deepEqual(p.sent, drm("com.widevine.alpha", "licence"));
+});
+
+test("a refused licence for keys requested during a click prompts without a play event, unless something plays", async () => {
+  const quiet = page(["com.widevine.alpha"], { cdm: { licence: "rejected" } });
+  quiet.navigator.userActivation.isActive = true;
+  const played = await quiet.sessionFor();
+  quiet.navigator.userActivation.isActive = false;
+  await assert.rejects(played.update(new Uint8Array()));
+  await settle();
+  quiet.addMedia({ paused: false, readyState: 4, currentTime: 1 });
+  quiet.advance(6000);
+  assert.deepEqual(quiet.sent, []);
+
+  const p = page(["com.widevine.alpha"], { cdm: { licence: "rejected" } });
+  p.navigator.userActivation.isActive = true;
+  const session = await p.sessionFor();
+  p.navigator.userActivation.isActive = false;
+  await assert.rejects(session.update(new Uint8Array()));
+  await settle();
+  p.advance(5000);
+  assert.deepEqual(p.sent, drm("com.widevine.alpha", "licence"));
+});
+
+test("output-restricted or internal-error key statuses count once playback stalls, usable keys and playing fallbacks stay quiet", async () => {
+  for (const status of ["output-restricted", "internal-error"]) {
+    const p = page(["com.widevine.alpha"], { cdm: { licence: "granted" } });
+    const session = await p.sessionFor();
+    await session.update(new Uint8Array());
+    const video = p.addMedia({ paused: false, readyState: 1 });
+    p.fire(video, "play");
+    session.showStatus(status);
+    p.advance(5000);
+    assert.deepEqual(p.sent, drm("com.widevine.alpha", "keystatus"), status);
+  }
+
+  const p = page(["com.widevine.alpha"], { cdm: { licence: "granted" } });
+  const usable = await p.sessionFor();
+  await usable.update(new Uint8Array());
+  usable.showStatus("usable");
+  usable.showStatus("output-downscaled");
+  const restricted = await p.sessionFor();
+  restricted.showStatus("output-restricted");
+  const video = p.addMedia({ paused: false, readyState: 1 });
+  p.fire(video, "play");
+  Object.assign(video, { readyState: 4, currentTime: 2 });
+  p.advance(10000);
+  assert.deepEqual(p.sent, []);
+});
+
+test("a decrypt error on media keyed by a protected system prompts at once, other errors and Clear Key media don't", async () => {
+  const p = page(["com.widevine.alpha", "org.w3.clearkey"], { cdm: { licence: "granted" } });
+  const widevine = await p.keysFor();
+  const clearKey = await p.keysFor("org.w3.clearkey");
+  p.fire(p.addMedia({ mediaKeys: widevine, error: { code: 3, message: "PIPELINE_ERROR_DECODE: video decoder reinitialization failed" } }), "error");
+  p.fire(p.addMedia({ mediaKeys: widevine, error: { code: 3, message: "PIPELINE_ERROR_DECODE: first buffer is not a keyframe" } }), "error");
+  p.fire(p.addMedia({ mediaKeys: clearKey, error: { code: 5, message: "" } }), "error");
+  p.fire(p.addMedia({ error: { code: 3, message: "PIPELINE_ERROR_DECRYPT" } }), "error");
+  assert.deepEqual(p.sent, []);
+  p.fire(p.addMedia({ mediaKeys: widevine, error: { code: 3, message: "PIPELINE_ERROR_DECRYPT: decrypt error" } }), "error");
+  assert.deepEqual(p.sent, drm("com.widevine.alpha", "licence"));
+
+  const encrypted = page(["com.widevine.alpha"], { cdm: { licence: "granted" } });
+  const keys = await encrypted.keysFor();
+  encrypted.fire(encrypted.addMedia({ mediaKeys: keys, error: { code: 5 } }), "error");
+  assert.deepEqual(encrypted.sent, drm("com.widevine.alpha", "licence"));
+});
+
+test("a later licence failure takes over from an earlier refused probe, naming the system that failed", async () => {
+  const p = page(["com.widevine.alpha"], { cdm: { licence: "rejected" } });
+  await p.refuse("com.microsoft.playready");
+  const session = await p.sessionFor();
+  await assert.rejects(session.update(new Uint8Array()));
+  await settle();
+  p.fire(p.addMedia({ paused: false, readyState: 1 }), "play");
+  p.advance(5000);
+  assert.deepEqual(p.sent, drm("com.widevine.alpha", "licence"));
+});
+
+test("Clear Key sessions aren't watched, a granted licence that plays stays quiet, and the wrapped methods keep their shape", async () => {
+  const p = page(["com.widevine.alpha", "org.w3.clearkey"], { cdm: { licence: "rejected" } });
+  const clearKey = await p.sessionFor("org.w3.clearkey");
+  await assert.rejects(clearKey.update(new Uint8Array()));
+  clearKey.showStatus("internal-error");
+  await settle();
+  p.fire(p.addMedia({ paused: false, readyState: 1 }), "play");
+  p.advance(10000);
+  assert.deepEqual(p.sent, []);
+  for (const [proto, name, length] of [[p.MediaKeys.prototype, "createSession", 0], [p.MediaKeySession.prototype, "update", 1]]) {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+    assert.equal(descriptor.enumerable, false);
+    assert.equal(descriptor.value.name, name);
+    assert.equal(descriptor.value.length, length);
+    assert.equal(Function.prototype.toString.call(descriptor.value), "function () { [native code] }");
+  }
+
+  const playing = page(["com.widevine.alpha"], { cdm: { licence: "granted" } });
+  const session = await playing.sessionFor();
+  await session.update(new Uint8Array());
+  session.showStatus("usable");
+  const video = playing.addMedia({ paused: false, readyState: 1 });
+  playing.fire(video, "play");
+  Object.assign(video, { readyState: 4, currentTime: 3 });
+  playing.advance(10000);
+  assert.deepEqual(playing.sent, []);
 });

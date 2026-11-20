@@ -9,6 +9,7 @@ import type {
   CliControlStatus,
   CliTabTarget,
   EngineBookmark,
+  EngineComponent,
   EngineEvents,
   EngineTask,
   EventData,
@@ -45,6 +46,7 @@ const testGlobals = globalThis as {
   acTestCliOwns?: (tabId: string) => { owned: boolean; shown: boolean };
   acTestCliMoveOffscreen?: (tabId: string) => { ok: boolean; reason?: string };
   acTestTasks?: () => EngineTask[];
+  acTestComponents?: () => EngineComponent[];
   acTestEngineInfo?: () => CallResult<"engine.info">;
   acTestUserScripts?: { engine: ExtensionEngine };
   acTestSuggest?: (args: { url: string; id: number; profile: string }) => CallResult<"search.suggest"> | undefined;
@@ -422,7 +424,7 @@ const fakeModules = {
   ArdiaEngine: domain(
     "engine",
     {
-      components: () => [],
+      components: () => testGlobals.acTestComponents?.() ?? [],
       tasks: () => testGlobals.acTestTasks?.() ?? [],
       info: () => {
         const info = testGlobals.acTestEngineInfo?.();

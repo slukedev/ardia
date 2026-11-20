@@ -6,13 +6,12 @@ import { setWebsiteEngine } from "../../../state/engines/actions";
 import { useSettings } from "../../../state/browser/hooks";
 import { updateSettings } from "../../../state/settings/actions";
 import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
-import { Button, DialogActions, DialogTitle, lineHeight, PopUp, Sheet, space, Symbol, Text, TextField } from "../../ui";
-import { perLook } from "../../ui/tokens";
+import { Button, DialogActions, DialogTitle, PopUp, Sheet, space, Symbol, Text, TextField } from "../../ui";
 import { useTheme } from "../../ui/theme";
 import { Favicon } from "../../favicon/Favicon";
-import { FormField, Group, Row, SectionHeader } from "../Form";
-import { setting } from "../settingsIndex";
+import { FormField, Group, Row, SectionHeader, SettingToggle } from "../Form";
 import { PasskeyAccessRow } from "./PasskeyAccessRow";
+import { ABOUT_ENGINES_TITLE, showWebKitLimits } from "./WebKitLimitsSheet";
 
 const ENGINE_OPTIONS: { value: PageEngine; title: string }[] = [
   { value: "chromium", title: ENGINE_NAMES.chromium },
@@ -29,34 +28,31 @@ export function WebEngineSection() {
   const engine = useSettings((settings) => defaultEngine({ settings }));
   const rules = useSettings((s) => s.websiteEngines);
   const protectedVideo = useSettings((s) => s.protectedVideoInWebKit);
+  const automatic = useSettings((s) => s.engineMode === "automatic");
   const sites = Object.keys(rules).sort((a, b) => siteLabel(a).localeCompare(siteLabel(b)));
   return (
     <>
       <SectionHeader title="Web engine" />
       <Group>
-        <Row
-          anchor="advanced.pageEngine"
-          description={
-            <View>
-              <Text size="caption" tone="textSecondary" style={DETAIL()}>
-                {setting("advanced.pageEngine").description}
-              </Text>
-              <View style={HELP_LINK}>
-                <Button variant="text" look="link" pad="none" title="How engines differ" onPress={() => showSettingsSheet(<EnginesDifferSheet />)} />
-              </View>
-            </View>
-          }
-        >
+        <Row anchor="advanced.pageEngine">
           <PopUp value={engine} options={DEFAULT_ENGINE_OPTIONS} onChange={(value) => updateSettings({ pageEngine: value })} minWidth={190} />
         </Row>
         <Row anchor="advanced.websiteEngines">
           {!protectedVideo && <Button title="Add Streaming Sites" onPress={() => updateSettings({ protectedVideoInWebKit: true })} />}
           <Button title="Add Rule…" icon="plus" onPress={() => showSettingsSheet(<RuleSheet />)} />
         </Row>
-        {protectedVideo && <StreamingSitesRow />}
-        {sites.map((site) => (
-          <RuleRow key={site} site={site} engine={rules[site]!} />
-        ))}
+        {automatic && protectedVideo && <StreamingSitesRow />}
+        {automatic && sites.map((site) => <RuleRow key={site} site={site} engine={rules[site]!} />)}
+        <SettingToggle anchor="advanced.offerWebKitForProtectedVideo" />
+      </Group>
+      <SectionHeader title="Switching engines" />
+      <Group>
+        <SettingToggle anchor="advanced.engineSwitchKeepsPage" />
+        <SettingToggle anchor="advanced.engineSwitchAsksAboutUnsavedWork" />
+      </Group>
+      <SectionHeader title="WebKit pages" />
+      <Group>
+        <Row anchor="advanced.enginesDiffer" onPress={() => showSettingsSheet(<EnginesDifferSheet />)} />
       </Group>
     </>
   );
@@ -143,9 +139,12 @@ function EnginesDifferSheet() {
       <DialogTitle subtitle="Every page opens in Chromium or WebKit. Here's what changes between them.">How engines differ</DialogTitle>
       <View style={DIFFER_LIST}>
         <Group>
-          <Row title="Separate sign-ins" description="Each engine keeps its own cookies and site data." />
-          <Row title="Extensions and ad blocking are Chromium only" description="WebKit pages run without extensions or the ad blocker for now." />
+          <Row
+            title="Separate sign-ins"
+            description="Each engine keeps its own cookies and site data in every profile. With Bring sign-ins along on, a site's cookies and saved data follow it to the other engine; other offline data stays put."
+          />
           <PasskeyAccessRow waiting={PASSKEYS_WAITING} />
+          <Row title={ABOUT_ENGINES_TITLE} description="How Automatic picks an engine, and what WebKit pages can't do." onPress={() => showWebKitLimits("enginesPane")} />
         </Group>
       </View>
       <DialogActions>
@@ -155,8 +154,6 @@ function EnginesDifferSheet() {
   );
 }
 
-const DETAIL = perLook(() => ({ marginTop: space.xxs, lineHeight: lineHeight.caption }) as const);
-const HELP_LINK = { flexDirection: "row", marginTop: space.xs } as const;
 const STREAMING_ICON = { width: 20, height: 20 } as const;
 const DIFFER_LIST = { marginTop: space.m } as const;
 const ERROR = { marginTop: space.ml } as const;

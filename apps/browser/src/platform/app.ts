@@ -20,7 +20,7 @@ export type { AppEvent, OpenURLSource };
 
 export { replyToTerminate } from "./windows";
 
-export { WIDEVINE_COMPONENT_ID } from "@ardia/ardiacore";
+export { WIDEVINE_COMPONENT_ID, type EngineComponent } from "@ardia/ardiacore";
 
 export const engineInfo = () => call("engine.info");
 export const listComponents = () => call("engine.components");

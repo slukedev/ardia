@@ -1,5 +1,6 @@
 import { customNewTabUrl, SETTING_SPECS, type Settings, type SettingSpec } from "../settings/settings";
 import { commandBarStartFlags } from "../omnibox/commandBarStart";
+import { WIDEVINE_COMPONENT_ID, type EngineComponent } from "../../platform/app";
 import { lookUse, type LookBlocks } from "../../lib/themeLook";
 import { type PresetLookFields } from "../../lib/profileLook";
 import { editedPresetCount } from "../../lib/presetLook";
@@ -72,6 +73,13 @@ export function customColorProfiles(profiles: Record<string, PresetLookFields>, 
     ...(main ? { default_profile_color_edited: main.theme ? "true" : "false" } : {}),
   };
 }
+
+const NOT_INSTALLED = "0.0.0.0";
+
+const widevineInstalled = (components: EngineComponent[]) => components.some((c) => c.id === WIDEVINE_COMPONENT_ID && c.version !== NOT_INSTALLED);
+
+export const widevineSetting = (components: EngineComponent[] | null): Record<string, string> =>
+  components ? { setting_widevine_installed: widevineInstalled(components) ? "true" : "false", default_widevine_installed: "false" } : {};
 
 export const openTabSyncProfiles = (profiles: Record<string, { syncTabs?: true }>): Record<string, string> => ({
   sync_open_tabs_profiles: String(Object.values(profiles).filter((profile) => !!profile.syncTabs).length),

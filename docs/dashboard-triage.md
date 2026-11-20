@@ -4,6 +4,8 @@
 
 The dashboard's `/settings` page, which settings opted-in users change, is described in `docs/dashboard-settings.md`.
 
+The `/health` page's Protected video panel (`server/sections/protected-video.ts`, section `health.protectedVideo`) shows protected video in Chromium tabs (Ardia has no Widevine support; protected video plays in WebKit): the share of installs whose latest `settings_snapshot` reports `setting_widevine_installed = "true"`, then `usage_counts`' `drm_refusals` with its stages (`drm_refusals_access`, `drm_refusals_create_keys`, `drm_refusals_licence`, `drm_refusals_keystatus`), summed per app version. Refusals counted with no stage show as No stage. The same `setting_widevine_installed` also lists on `/settings` like any setting, with default `false`.
+
 ## Credentials
 
 The dashboard's `reader` user only sees `telemetry.*`, so triage uses its own connection, configured with env vars that `serverEnv()` reads like the rest:

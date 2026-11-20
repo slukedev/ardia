@@ -1,6 +1,6 @@
 import { switchOn } from "../../platform/killSwitches";
 import type { BrowserState } from "../browser/store";
-import { tabEngine } from "../engines/engines";
+import { singleEngine, tabEngine } from "../engines/engines";
 import { engineProfile } from "../browser/model";
 import { isRegularWindow, lastActiveProfile } from "../windows/small";
 import { wakeOf } from "./pageSession";
@@ -20,4 +20,5 @@ export function launchTab(s: Pick<BrowserState, "windows" | "tabs" | "settings" 
   return { id: t.id, url: t.url, profile: engineProfile(s, t.profileId) };
 }
 
-export const linkProfile = (s: Pick<BrowserState, "profiles" | "windows" | "windowOrder" | "ui" | "settings">): string => engineProfile(s, lastActiveProfile(s));
+export const linkProfile = (s: Pick<BrowserState, "profiles" | "windows" | "windowOrder" | "ui" | "settings">): string | null =>
+  singleEngine(s) === "webkit" ? null : engineProfile(s, lastActiveProfile(s));

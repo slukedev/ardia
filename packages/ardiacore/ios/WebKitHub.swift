@@ -114,6 +114,12 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     webView.removeFromSuperview()
   }
 
+  func setZoom(_ zoom: Double, profile: String, host: String) {
+    guard zoom.isFinite, !host.isEmpty else { return }
+    let level = WebKitTab.zoomLevels.min { abs($0 - zoom) < abs($1 - zoom) } ?? 1
+    stores.setZoom(level, profile: profile, host: host)
+  }
+
   func resumeHost(for profile: String) -> WKWebView {
     stores.resumeHost(for: profile) { configuration(profile: profile) }
   }

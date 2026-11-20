@@ -1,8 +1,6 @@
 import { useBrowser } from "../browser/store";
 import {
   engineInfo,
-  listComponents,
-  WIDEVINE_COMPONENT_ID,
   appIcons,
   currentAppIcon,
   isDefaultBrowser,
@@ -70,20 +68,13 @@ export const shortcutItems = resource("menuShortcuts", () =>
   ),
 );
 export const engineVersion = resource("engineInfo", () => engineInfo().catch(() => null));
-export const widevine = resource("widevine", () =>
-  listComponents().then(
-    (list) => list.find((c) => c.id === WIDEVINE_COMPONENT_ID) ?? null,
-    () => null,
-  ),
-);
-
 const defaultProfile = () => engineProfile(useBrowser.getState(), currentSettings().defaultProfileId);
 
 export function paneNeeds(pane: SettingsPane, profileId: string | null): Needed[] {
   const profile = profileId ? engineProfile(useBrowser.getState(), profileId) : defaultProfile();
   switch (pane) {
     case "general":
-      return [need(loginItem), need(defaultBrowser), need(updater), need(downloadSettings, profile), need(contentBlocker), need(syncFolder, currentSyncFolder() ?? null), need(engineVersion), need(widevine)];
+      return [need(loginItem), need(defaultBrowser), need(updater), need(downloadSettings, profile), need(contentBlocker), need(syncFolder, currentSyncFolder() ?? null), need(engineVersion)];
     case "profiles":
       return [
         need(downloadSettings, profile),

@@ -1,8 +1,13 @@
-import { type SettingSection } from "./types";
+import { WEBKIT_LIMITS_KEYWORDS, type SettingSection } from "./types";
 import type { SettingsPane } from "../../../state/settings/settingsWindows";
+import type { Settings } from "../../../state/settings/settings";
 import { PLATFORM_FEATURES } from "../../../lib/platformFeatures";
 
 const webKitOffered = () => PLATFORM_FEATURES.webKit;
+const automaticEngine = (s: Settings) => webKitOffered() && s.engineMode === "automatic";
+const webKitInUse = (s: Settings) => webKitOffered() && s.engineMode !== "chromium";
+const NEEDS_AUTOMATIC = "Set Engine to Automatic in General to use this";
+const NEEDS_WEBKIT = "Set Engine to Automatic or WebKit in General to use this";
 
 export const advancedRows = {
   advanced: [
@@ -52,14 +57,56 @@ export const advancedRows = {
           title: "Open pages in",
           explained: true,
           description: "Unless a website rule says otherwise.",
-          keywords: ["engine", "webkit", "chromium", "safari", "drm", "netflix", "fairplay", "widevine", "reset", "recommended", "use recommended default", "cookies", "site data", "sign in", "logged out", "separate sign-ins", "extensions", "ad blocker", "ublock", "content blocker", "extensions and ad blocking are chromium only", "passkey", "webauthn", "icloud keychain", "passwords app", "security key", "passkeys"],
-          shown: webKitOffered,
+          keywords: ["engine", "webkit", "chromium", "safari", "drm", "netflix", "fairplay", "widevine", "reset", "recommended", "use recommended default"],
+          shown: automaticEngine,
+          needs: NEEDS_AUTOMATIC,
         },
         websiteEngines: {
           title: "Engine per site",
           description: "Sites that always open in a chosen engine.",
           keywords: ["opens in", "site engine", "rule", "webkit", "chromium", "website rules", "drm", "netflix", "disney", "hbo", "max", "prime video", "hulu", "spotify", "apple tv", "apple music", "fairplay", "widevine", "streaming", "tencent video", "v.qq.com", "open streaming sites in webkit"],
+          shown: automaticEngine,
+          needs: NEEDS_AUTOMATIC,
+        },
+        offerWebKitForProtectedVideo: {
+          title: "Offer WebKit when a video won't play",
+          explained: true,
+          description: "When a Chromium page can't play protected video, Ardia offers to open it in WebKit.",
+          keywords: ["drm", "protected video", "prompt", "open in webkit", "fairplay", "streaming", "stay on page", "drm prompt"],
+          shown: automaticEngine,
+          needs: NEEDS_AUTOMATIC,
+        },
+      },
+    },
+    {
+      section: "Switching engines",
+      rows: {
+        engineSwitchKeepsPage: {
+          title: "Keep the page on screen while it switches",
+          explained: true,
+          description: "The old page stays up, at the same scroll position, until the other engine has drawn it, for up to 3 seconds.",
+          keywords: ["seamless", "swap", "flash", "blank", "reload", "scroll position", "switch engine", "switching engines", "open in webkit", "open in chromium"],
           shown: webKitOffered,
+        },
+        engineSwitchAsksAboutUnsavedWork: {
+          title: "Ask before reloading a page you've typed in",
+          explained: true,
+          description: "Switching engines reloads the page, so text you haven't sent can be lost.",
+          keywords: ["unsaved", "form", "input", "confirm", "warn", "stay on page", "switch engine", "switching engines"],
+          shown: webKitOffered,
+        },
+      },
+    },
+    {
+      section: "WebKit pages",
+      rows: {
+        enginesDiffer: {
+          title: "How engines differ",
+          explained: true,
+          description: "Sign-ins, passkeys, and what WebKit pages can't do.",
+          keywords: ["cookies", "site data", "sign in", "logged out", "separate sign-ins", "extensions", "ad blocker", "ublock", "content blocker", "passkey", "webauthn", "icloud keychain", "passwords app", "security key", "passkeys", "widevine", "streaming", ...WEBKIT_LIMITS_KEYWORDS],
+          shown: webKitInUse,
+          needs: NEEDS_WEBKIT,
         },
       },
     },

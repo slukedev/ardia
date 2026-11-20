@@ -2,17 +2,39 @@ import { addHistoryVisits } from "../../platform/history";
 import type { PageEngine, ProtectedMediaRequest } from "../../platform/tabs";
 import { confirm } from "../../platform/dialogs";
 import { create } from "zustand";
-import { useBrowser } from "../browser/store";
+import { storeTransaction, useBrowser } from "../browser/store";
 import { pageOf, patchPage } from "../tabs/pageState";
-import { hideKeyedToast, showToast } from "../app/toasts";
-import { canSwitchEngine, chosenEngine, ENGINE_NAMES, siteOf, tabEngine, visitRecorder, type WebKitPage } from "./engines";
+import {
+  canSwitchEngine,
+  chosenEngine,
+  chromiumOnly,
+  drivenByChrome,
+  ENGINE_NAMES,
+  engineMode,
+  engineUnderMode,
+  modeEngineFor,
+  needsChromium,
+  singleEngine,
+  siteOf,
+  tabEngine,
+  visitRecorder,
+  webStorePage,
+  type EngineMode,
+  type WebKitPage,
+} from "./engines";
 import { engineProfile, isIncognitoProfile, navigationTo } from "../browser/model";
 import type { Tab } from "../browser/types";
 import { carrySignInToWebKit, signInCarryOn } from "./engineSignIn";
+import { dropSwap, holdPageForSwap } from "./engineSwap";
 import { wantsPage } from "../tabs/tabPages";
 import { webviews } from "../../platform/webviews";
 import { withDeadline } from "../../lib/deadline";
 import { loadedPage, navigationOf } from "../tabs/pageSession";
+import { noteEngineModeChange, noteEngineModeVideoNotice } from "../telemetry/engineSwitchCounts";
+import { consentToken } from "../telemetry/client";
+import { showToast } from "../app/toasts";
+import { openSettings } from "../settings/settingsWindows";
+import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 
 export type EngineOffer = { site: string; host: string; keySystem: string; canRemember: boolean };
 
@@ -20,11 +42,21 @@ export const useEngineOffers = create<Record<string, EngineOffer>>()(() => ({}))
 
 const store = () => useBrowser.getState();
 const declinedSites = new Set<string>();
+const toldInChromiumMode = new Set<string>();
 const movingTabs = new Set<string>();
 const siteMoves = new Map<string, number>();
-const siteWatches = new Map<string, () => void>();
 const SITE_MOVE_SPACING_MS = 10_000;
 const hostLabel = (site: string) => new URL(site).hostname.replace(/^www\./, "");
+
+export const useEngineModeSwitch = create<{ pending: EngineMode | null }>()(() => ({ pending: null }));
+
+let modeGeneration = 0;
+
+function modeStillHolds(): () => boolean {
+  const generation = modeGeneration;
+  const mode = engineMode(store());
+  return () => generation === modeGeneration && engineMode(store()) === mode && !useEngineModeSwitch.getState().pending;
+}
 
 const UNSAVED_WORK = `(() => {
   const fields = Array.from(document.querySelectorAll("input:not([type=hidden]):not([type=password]):not([type=submit]):not([type=button]), textarea, select"));
@@ -49,12 +81,17 @@ export function setWebsiteEngine(url: string, engine: PageEngine | null) {
 }
 
 export function persistEngine(tabId: string, engine: PageEngine) {
-  const t = store().tabs[tabId];
-  if (t && !t.engine) store().updateTab(tabId, { engine });
+  const s = store();
+  const t = s.tabs[tabId];
+  if (!t) return;
+  const opened = engine === "chromium" && !t.chromeOpened && drivenByChrome(s, t);
+  if (!t.engine || opened) s.updateTab(tabId, { ...(t.engine ? {} : { engine }), ...(opened ? { chromeOpened: true as const } : {}) });
 }
 
+const asksAboutUnsavedWork = () => store().settings.engineSwitchAsksAboutUnsavedWork;
+
 async function mayLeavePage(t: Tab, title: string, message: string, confirmTitle: string, ask: typeof confirm = confirm): Promise<boolean> {
-  if (!wantsPage(t) || !(await hasUnsavedWork(t.id))) return true;
+  if (!wantsPage(t) || !asksAboutUnsavedWork() || !(await hasUnsavedWork(t.id))) return true;
   const { confirmed } = await ask({ title, message, confirmTitle, cancelTitle: "Stay on Page", windowId: t.windowId });
   return confirmed;
 }
@@ -65,32 +102,70 @@ export async function goBackAcrossEngines(tabId: string, mayAct: () => boolean =
   const back = pageOf(tabId).engineBack;
   const t = store().tabs[tabId];
   if (!back || !t) return false;
+  const forced = modeEngineFor(store(), t, back.url);
+  if (forced && forced !== back.engine) {
+    patchPage(tabId, { engineBack: null });
+    return false;
+  }
   const from = pageUrl(t);
+  const holds = modeStillHolds();
   const leaving = await mayLeavePage(t, "Go back to the previous page?", `It opens in ${ENGINE_NAMES[back.engine]}, so changes you made on this page may not be saved.`, "Go Back", ask);
   const now = store().tabs[tabId];
-  if (!leaving || !now || pageUrl(now) !== from || pageOf(tabId).engineBack !== back || !mayAct()) return false;
+  if (!leaving || !holds() || !now || pageUrl(now) !== from || pageOf(tabId).engineBack !== back || !mayAct()) return false;
   patchPage(tabId, { engineBack: null });
+  const held = await holdPageForSwap(tabId, tabEngine(store(), tabId), back.engine, back.url, false, holds);
+  if (!holds() || pageUrl(store().tabs[tabId]) !== from) {
+    dropSwap(tabId, held);
+    return false;
+  }
   store().updateTab(tabId, { engine: back.engine, page: loadedPage(navigationTo(back.url, true)) });
   return true;
 }
 
-export async function openPageIn(tabId: string, engine: PageEngine, options: { rule?: PageEngine | null; checkWork?: boolean; mayWrite?: () => boolean } = {}): Promise<boolean> {
+type MoveOptions = { rule?: PageEngine | null; checkWork?: boolean; mayWrite?: () => boolean };
+
+const switchingTabs = new Set<string>();
+
+export async function openPageIn(tabId: string, engine: PageEngine, options: MoveOptions = {}): Promise<boolean> {
+  if (switchingTabs.has(tabId)) return false;
+  switchingTabs.add(tabId);
+  try {
+    return await movePage(tabId, engine, options);
+  } finally {
+    switchingTabs.delete(tabId);
+  }
+}
+
+async function movePage(tabId: string, engine: PageEngine, options: MoveOptions): Promise<boolean> {
   const t = store().tabs[tabId];
   if (!t) return false;
   const url = t.url || navigationOf(t)?.url || "";
-  if (!canSwitchEngine(url)) return false;
+  if (!canSwitchEngine(url) && !(engine === "chromium" && webStorePage(url))) return false;
+  const forced = modeEngineFor(store(), t, url);
+  if (forced && forced !== engine) return false;
   const saveRule = () => options.rule !== undefined && !isIncognitoProfile(t.profileId) && setWebsiteEngine(url, options.rule);
   clearEngineOffer(tabId);
   if (tabEngine(store(), tabId) === engine) {
     saveRule();
     return true;
   }
+  const holds = modeStillHolds();
   if (options.checkWork !== false && !(await mayLeavePage(t, `Open this page in ${ENGINE_NAMES[engine]}?`, `The page reloads in ${ENGINE_NAMES[engine]}, so changes you made on it may not be saved.`, `Open in ${ENGINE_NAMES[engine]}`))) return false;
+  if (!holds()) return false;
   if (engine === "webkit" && signInCarryOn()) await carrySignInToWebKit(tabId, url);
+  if (!holds()) return false;
+  const from = tabEngine(store(), tabId);
+  const held = from !== engine && wantsPage(store().tabs[tabId]) ? await holdPageForSwap(tabId, from, engine, url, true, holds) : null;
   const now = store().tabs[tabId];
-  if (!now || (now.url || navigationOf(now)?.url || "") !== url || (options.mayWrite && !options.mayWrite())) return false;
+  if (!holds() || !now || pageUrl(now) !== url || (options.mayWrite && !options.mayWrite())) {
+    dropSwap(tabId, held);
+    return false;
+  }
   saveRule();
-  if (tabEngine(store(), tabId) === engine) return true;
+  if (tabEngine(store(), tabId) === engine) {
+    dropSwap(tabId, held);
+    return true;
+  }
   store().updateTab(tabId, wantsPage(now) ? { engine, page: loadedPage(navigationTo(now.url || url, true)) } : { engine });
   return true;
 }
@@ -103,11 +178,31 @@ export function offerWebKit(tabId: string, { keySystem }: ProtectedMediaRequest)
   if (!t || tabEngine(s, tabId) === "webkit") return;
   const site = siteOf(t.url);
   if (!site) return;
+  if (singleEngine(s) === "chromium") return tellChromiumModeBlocks(t, site);
+  if (singleEngine(s)) return;
   const rule = chosenEngine(s, t.url);
   if (rule === "chromium" || declinedSites.has(site)) return;
   if (rule === "webkit") return void moveForProtectedVideo(tabId, site);
+  if (!s.settings.offerWebKitForProtectedVideo) return;
   if (useEngineOffers.getState()[tabId]?.site === site) return;
   useEngineOffers.setState({ [tabId]: { site, host: hostLabel(site), keySystem, canRemember: !isIncognitoProfile(t.profileId) } });
+}
+
+function tellChromiumModeBlocks(t: Tab, site: string) {
+  if (!PLATFORM_FEATURES.webKit || toldInChromiumMode.has(site)) return;
+  toldInChromiumMode.add(site);
+  noteEngineModeVideoNotice("shown", consentToken());
+  showToast(t.windowId, "Protected video won't play in Chromium", `${hostLabel(site)} plays in WebKit. Set Engine to Automatic or WebKit in Settings.`, {
+    icon: "play.rectangle",
+    key: `engine-mode-video:${site}`,
+    action: {
+      title: "Open Settings",
+      run: () => {
+        noteEngineModeVideoNotice("opened", consentToken());
+        openSettings("general");
+      },
+    },
+  });
 }
 
 export function clearEngineOffer(tabId: string) {
@@ -138,43 +233,103 @@ async function moveForProtectedVideo(tabId: string, site: string) {
   } finally {
     movingTabs.delete(tabId);
   }
-  const t = store().tabs[tabId];
-  if (!t) return;
-  const key = `engine-move:${tabId}`;
-  const stillThere = () => siteOf(pageUrl(store().tabs[tabId])) === site;
-  showToast(t.windowId, "Opened in WebKit for protected video", `${hostLabel(site)} plays here with FairPlay. WebKit keeps its own sign-ins.`, {
-    icon: "play.rectangle",
-    key,
-    action: { title: "Move Back", run: () => void (stillThere() && openPageIn(tabId, "chromium", { rule: "chromium" })) },
-  });
-  siteWatches.get(tabId)?.();
-  const unwatchSite = useBrowser.subscribe((s, prev) => {
-    if (s.tabs[tabId] === prev.tabs[tabId] || stillThere()) return;
-    stopWatch();
-    hideKeyedToast(t.windowId, key);
-  });
-  const stopWatch = () => {
-    unwatchSite();
-    if (siteWatches.get(tabId) === stopWatch) siteWatches.delete(tabId);
-  };
-  siteWatches.set(tabId, stopWatch);
 }
 
-export function followSiteChoice(tabId: string, engine: PageEngine, url: string, previousUrl: string) {
-  const site = siteOf(url);
-  if (!site || site === siteOf(previousUrl)) return;
-  const s = store();
-  const t = s.tabs[tabId];
-  if (!t || t.openerId) return;
-  const chosen = chosenEngine(s, url);
-  if (!chosen || chosen === engine) return;
+function moveAfterNavigation(tabId: string, from: PageEngine, to: PageEngine, previousUrl: string) {
   const now = Date.now();
   if (now - (siteMoves.get(tabId) ?? 0) < SITE_MOVE_SPACING_MS) return;
   siteMoves.set(tabId, now);
   watchClosedTabs();
-  void openPageIn(tabId, chosen, { checkWork: false }).then((moved) => {
-    if (moved && canSwitchEngine(previousUrl)) patchPage(tabId, { engineBack: { engine, url: previousUrl } });
+  const holds = modeStillHolds();
+  void openPageIn(tabId, to, { checkWork: false }).then((moved) => {
+    if (moved && holds() && (canSwitchEngine(previousUrl) || needsChromium(previousUrl))) patchPage(tabId, { engineBack: { engine: from, url: previousUrl } });
   });
+}
+
+export function followSiteChoice(tabId: string, engine: PageEngine, url: string, previousUrl: string) {
+  const s = store();
+  const t = s.tabs[tabId];
+  if (!t) return;
+  if (singleEngine(s)) {
+    const forced = modeEngineFor(s, t, url);
+    const followsMode = forced === "chromium" || chromiumOnly(previousUrl) || (leftForChromium(previousUrl) && !googleSignIn(url));
+    if (forced && forced !== engine && followsMode && (canSwitchEngine(url) || needsChromium(url))) moveAfterNavigation(tabId, engine, forced, previousUrl);
+    return;
+  }
+  const site = siteOf(url);
+  if (!site || site === siteOf(previousUrl) || t.openerId) return;
+  const chosen = chosenEngine(s, url);
+  if (chosen && chosen !== engine) moveAfterNavigation(tabId, engine, chosen, previousUrl);
+}
+
+const GOOGLE_SIGN_IN = /^https:\/\/accounts\.google\.com([/?#]|$)/i;
+const googleSignIn = (url: string | undefined | null) => !!url && GOOGLE_SIGN_IN.test(url);
+const leftForChromium = (url: string | undefined | null) => webStorePage(url) || googleSignIn(url);
+
+const MODE_NAMES: Record<EngineMode, string> = { automatic: "Automatic", chromium: ENGINE_NAMES.chromium, webkit: ENGINE_NAMES.webkit };
+
+export function modeSwitchConfirm(mode: EngineMode, unsavedPages: number, windowId?: string) {
+  const pages = unsavedPages === 1 ? "A page with unsaved changes reloads" : `${unsavedPages} pages with unsaved changes reload`;
+  return { title: `Switch to ${MODE_NAMES[mode]}?`, message: `${pages}, so the changes may be lost.`, confirmTitle: `Switch to ${MODE_NAMES[mode]}`, cancelTitle: "Cancel", windowId };
+}
+
+async function carryEachSite(moves: { tab: Tab; to: PageEngine; url: string }[]) {
+  if (!signInCarryOn()) return;
+  const carried = new Set<string>();
+  await Promise.all(
+    moves.map(({ tab, to, url }) => {
+      const key = `${tab.profileId}|${siteOf(url)}`;
+      if (to !== "webkit" || carried.has(key)) return;
+      carried.add(key);
+      return carrySignInToWebKit(tab.id, url);
+    }),
+  );
+}
+
+export async function setEngineMode(mode: EngineMode, options: { windowId?: string } = {}): Promise<boolean> {
+  const before = store();
+  if (useEngineModeSwitch.getState().pending || engineMode(before) === mode) return false;
+  const consent = consentToken();
+  useEngineModeSwitch.setState({ pending: mode });
+  try {
+    const target = { ...before, settings: { ...before.settings, engineMode: mode } };
+    const live = Object.values(before.tabs)
+      .filter((tab) => wantsPage(tab) && !!pageUrl(tab))
+      .map((tab) => ({ tab, from: tabEngine(before, tab.id), to: engineUnderMode(target, tab), url: pageUrl(tab) }))
+      .filter((m) => m.from !== m.to);
+    const unsaved = asksAboutUnsavedWork() ? (await Promise.all(live.map((m) => hasUnsavedWork(m.tab.id)))).filter(Boolean).length : 0;
+    if (unsaved > 0 && !(await confirm(modeSwitchConfirm(mode, unsaved, options.windowId))).confirmed) {
+      noteEngineModeChange({ cancelled: true, moved: 0 }, consent);
+      return false;
+    }
+    await carryEachSite(live);
+    const holds = new Map(await Promise.all(live.map(async (m) => [m.tab.id, await holdPageForSwap(m.tab.id, m.from, m.to, m.url, true)] as const)));
+    let moved = 0;
+    storeTransaction(() => {
+      const now = store();
+      const next = { ...now, settings: { ...now.settings, engineMode: mode } };
+      modeGeneration++;
+      now.updateSettings({ engineMode: mode });
+      for (const tab of Object.values(now.tabs)) {
+        const from = tabEngine(now, tab.id);
+        const to = engineUnderMode(next, tab);
+        if (pageOf(tab.id).engineBack) patchPage(tab.id, { engineBack: null });
+        if (from === to) {
+          if (tab.engine && tab.engine !== to) now.updateTab(tab.id, { engine: to });
+          dropSwap(tab.id, holds.get(tab.id) ?? null);
+          continue;
+        }
+        const url = pageUrl(tab);
+        moved++;
+        now.updateTab(tab.id, wantsPage(tab) && url ? { engine: to, page: loadedPage(navigationTo(tab.url || url, true)) } : { engine: to });
+      }
+    });
+    if (singleEngine(store())) useEngineOffers.setState({}, true);
+    noteEngineModeChange({ cancelled: false, moved }, consent);
+    return true;
+  } finally {
+    useEngineModeSwitch.setState({ pending: null });
+  }
 }
 
 const visits = visitRecorder(
@@ -203,5 +358,6 @@ export function noteWebKitPage(tabId: string, page: WebKitPage) {
   if (!t) return;
   watchClosedTabs();
   visitedTabs.add(tabId);
-  visits.note(tabId, isIncognitoProfile(t.profileId) ? null : engineProfile(useBrowser.getState(), t.profileId), page);
+  const profile = isIncognitoProfile(t.profileId) ? null : engineProfile(useBrowser.getState(), t.profileId);
+  visits.note(tabId, profile, page);
 }

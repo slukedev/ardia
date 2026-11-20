@@ -55,11 +55,7 @@ const text = (d: string, synced = false): SettingSpec<string> => ({ default: d, 
 const width = (d: number): SettingSpec<number> => ({ default: d, valid: isWidth, synced: false, schema: WIDTH });
 const fraction = (d: number, synced = false): SettingSpec<number> => ({ default: d, valid: (v) => typeof v === "number" && v >= 0 && v <= 1, synced, schema: { type: "number", minimum: 0, maximum: 1 } });
 const oneOf = <const V extends readonly string[]>(values: V, d: V[number], synced = false): SettingSpec<V[number]> & { values: V } => ({
-  default: d,
-  values,
-  valid: (v) => values.includes(v as string),
-  synced,
-  schema: { type: "string", enum: values },
+  default: d, values, valid: (v) => values.includes(v as string), synced, schema: { type: "string", enum: values },
 });
 const shaped = <T,>(d: T, valid: (v: unknown) => boolean, schema: JsonSchema, synced = false): SettingSpec<T> => ({ default: d, valid, synced, schema });
 
@@ -178,9 +174,13 @@ export const SETTING_SPECS = {
   littleArdiaOpensNewTabLinks: flag(true, SYNCED),
   littleArdiaShortcutFromAnyApp: flag(false),
   littleArdiaSize: shaped<[number, number]>([900, 640], (v) => Array.isArray(v) && v.length === 2 && v.every(isWidth), { type: "array", prefixItems: [WIDTH, WIDTH], minItems: 2, maxItems: 2 }),
+  engineMode: oneOf(["automatic", "chromium", "webkit"], "automatic"),
   pageEngine: oneOf(["chromium", "webkit"], "chromium"),
   websiteEngines: shaped<Record<string, "chromium" | "webkit">>({}, (v) => isRecordOf(v, (e) => e === "chromium" || e === "webkit"), recordOf({ type: "string", enum: ["chromium", "webkit"] })),
   protectedVideoInWebKit: flag(true),
+  offerWebKitForProtectedVideo: flag(true),
+  engineSwitchKeepsPage: flag(true),
+  engineSwitchAsksAboutUnsavedWork: flag(true),
   launchActions: shaped<string[]>([], (v) => isStringList(v) && v.length <= 20, { type: "array", items: { type: "string" }, maxItems: 20 }),
   omniboxProviders: shaped<ProviderEntry[]>([], isProviderEntryList, PROVIDERS_SCHEMA),
   readerTextSize: oneOf(READER_SIZE_NAMES, "medium", SYNCED),
@@ -227,10 +227,7 @@ export function parseSettingsMeta(raw: unknown): SettingsMeta {
 
 export const validSettingValue = (key: SettingKey, value: unknown) => SETTING_SPECS[key].valid(value);
 
-const engineCache = new WeakMap<
-  CustomSearchEngine[],
-  { legacyUrl: string; extension: ExtensionSearchEngine[]; engines: SearchEngine[] }
->();
+const engineCache = new WeakMap<CustomSearchEngine[], { legacyUrl: string; extension: ExtensionSearchEngine[]; engines: SearchEngine[] }>();
 
 export function searchEngines(settings: Settings): SearchEngine[] {
   const custom = settings.customSearchEngines;

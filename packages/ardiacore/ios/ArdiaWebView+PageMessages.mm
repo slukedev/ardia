@@ -229,7 +229,10 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
                                                    generation:generation];
     if (offer) [self emit:@"verificationCodeFound" payload:@{@"token" : offer[@"token"], @"app" : offer[@"app"], @"main" : @YES}];
   } else if ([kind isEqualToString:@"drm"] && dict) {
-    [self emit:@"protectedMedia" payload:@{@"keySystem" : Text(dict, @"keySystem", 64) ?: @"", @"main" : @(main)}];
+    NSMutableDictionary *request = [@{@"keySystem" : Text(dict, @"keySystem", 64) ?: @"", @"main" : @(main)} mutableCopy];
+    NSString *stage = Text(dict, @"stage", 16);
+    if ([@[ @"access", @"createMediaKeys", @"licence", @"keystatus" ] containsObject:stage ?: @""]) request[@"stage"] = stage;
+    [self emit:@"protectedMedia" payload:request];
   } else if ([kind isEqualToString:@"nowPlaying"]) {
     if (!_reports.nowPlaying) _reports.nowPlaying = [ArdiaNowPlaying new];
     NSDictionary *state = [_reports.nowPlaying noteFrame:frameId page:dict main:main];

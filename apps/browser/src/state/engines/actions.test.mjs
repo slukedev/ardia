@@ -3,11 +3,7 @@ import { registerHooks } from "node:module";
 import { test } from "node:test";
 
 globalThis.__DEV__ = false;
-const toasts = new Map();
-globalThis.engineTestToasts = toasts;
 const stubs = {
-  "../app/toasts": `export const showToast = (windowId, title, message, options) => globalThis.engineTestToasts.set(windowId, { title, ...options });
-    export const hideKeyedToast = (windowId, key) => globalThis.engineTestToasts.get(windowId)?.key === key && globalThis.engineTestToasts.delete(windowId);`,
   "../tabs/tabPages": "export const wantsPage = (t) => !!t && !!(t.page.nav || t.page.adopt);",
 };
 registerHooks({
@@ -21,7 +17,14 @@ const { useBrowser } = await import("../browser/store.ts");
 const model = await import("../browser/model.ts");
 const { webviews } = await import("../../platform/webviews.ts");
 const { patchPage, pageOf } = await import("../tabs/pageState.ts");
-const { goBackAcrossEngines, offerWebKit } = await import("./actions.ts");
+const { followSiteChoice, goBackAcrossEngines, offerWebKit, openPageIn, setEngineMode, useEngineModeSwitch, useEngineOffers } = await import("./actions.ts");
+const { tabEngine } = await import("./engines.ts");
+const { dropSwap, useRetiringPages } = await import("./engineSwap.ts");
+
+const { shellNativeModules } = await import("../../test-native/shell.ts");
+const { useToasts } = await import("../app/toasts.ts");
+const { engineCalls } = await import("../../test-native/ardiacore.ts");
+const confirmNo = shellNativeModules.ArdiaDialogs.confirm;
 
 const S = () => useBrowser.getState();
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -41,6 +44,10 @@ test("Back across engines asks first when the page has unsaved input, and stayin
   assert.equal(await goBackAcrossEngines(tabId), false);
   assert.equal(S().tabs[tabId].engine, "webkit");
   assert.ok(pageOf(tabId).engineBack);
+  S().updateSettings({ engineSwitchAsksAboutUnsavedWork: false });
+  assert.equal(await goBackAcrossEngines(tabId), true, "with the question turned off, Back goes without asking");
+  assert.equal(S().tabs[tabId].engine, "chromium");
+  S().updateSettings({ engineSwitchAsksAboutUnsavedWork: true });
   webviews.clear();
 });
 
@@ -54,57 +61,299 @@ test("Back across engines without unsaved input reopens the page before in its e
   webviews.clear();
 });
 
-test("Move Back goes away once the tab leaves the moved site, and never saves a rule for another site", async () => {
+test("a streaming site moves to WebKit quietly: the old page is held until the new one paints, and Move Back stays in the tab's engine", async () => {
   S().hydrate({});
   S().updateSettings({ protectedVideoInWebKit: true });
   const w = S().createWindow({ url: "https://www.netflix.com/watch/1" });
   const tabId = model.activeTabId(S(), w);
   S().updateTab(tabId, { engine: "chromium", url: "https://www.netflix.com/watch/1" });
-  webviews.set(tabId, { evaluate: () => Promise.resolve(false) });
+  webviews.set(tabId, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
   offerWebKit(tabId, { keySystem: "com.widevine.alpha", main: true });
   await settle();
-  const toast = toasts.get(w);
-  assert.equal(toast?.action?.title, "Move Back");
-  S().updateTab(tabId, { url: "https://other.example/" });
-  assert.equal(toasts.has(w), false);
-  toast.action.run();
   await settle();
+  await settle();
+  assert.equal(S().tabs[tabId].engine, "webkit");
+  assert.deepEqual(useRetiringPages.getState()[tabId], { engine: "chromium" });
+  dropSwap(tabId);
+  assert.equal(useRetiringPages.getState()[tabId], undefined);
   assert.deepEqual(S().settings.websiteEngines, {});
   webviews.clear();
 });
 
-test("moving the same tab to WebKit again keeps one watch on its site, and closing the tab ends it", async () => {
+test("the protected-video offer shows only while its setting is on", async () => {
   S().hydrate({});
-  const realSubscribe = useBrowser.subscribe;
-  let live = 0;
-  useBrowser.subscribe = (listener) => {
-    live++;
-    const stop = realSubscribe(listener);
-    let stopped = false;
-    return () => {
-      if (!stopped) live--;
-      stopped = true;
-      stop();
-    };
-  };
-  try {
-    S().updateSettings({ websiteEngines: { "https://www.netflix.com": "webkit" } });
-    const w = S().createWindow({ url: "https://www.netflix.com/watch/1" });
-    const tabId = model.activeTabId(S(), w);
-    webviews.set(tabId, { evaluate: () => Promise.resolve(false) });
-    for (let i = 0; i < 3; i++) {
-      S().updateTab(tabId, { engine: "chromium", url: "https://www.netflix.com/watch/1" });
-      offerWebKit(tabId, { keySystem: "com.widevine.alpha", main: true });
-      await settle();
-      await settle();
-      assert.equal(S().tabs[tabId].engine, "webkit");
-    }
-    assert.equal(live, 1);
-    S().closeTab(tabId);
-    assert.equal(live, 0);
-  } finally {
-    useBrowser.subscribe = realSubscribe;
-    S().updateSettings({ websiteEngines: {} });
-    webviews.clear();
+  const tabId = liveTab("https://films.example/watch/1", "chromium");
+  S().updateSettings({ offerWebKitForProtectedVideo: false });
+  offerWebKit(tabId, { keySystem: "com.widevine.alpha", main: true });
+  assert.deepEqual(useEngineOffers.getState(), {});
+  S().updateSettings({ offerWebKitForProtectedVideo: true });
+  offerWebKit(tabId, { keySystem: "com.widevine.alpha", main: true });
+  assert.equal(useEngineOffers.getState()[tabId]?.host, "films.example");
+  webviews.clear();
+});
+
+function liveTab(url, engine, unsaved = false) {
+  const w = S().createWindow({ url });
+  const tabId = model.activeTabId(S(), w);
+  S().updateTab(tabId, { engine, url });
+  webviews.set(tabId, { evaluate: (script) => Promise.resolve(script.includes("defaultValue") ? unsaved : false), pageCookies: () => Promise.resolve([]) });
+  return tabId;
+}
+
+test("WebKit only moves every open page there, holding each old page until the new one paints", async () => {
+  S().hydrate({});
+  const a = liveTab("https://a.com/", "chromium");
+  const b = liveTab("https://b.com/", "chromium");
+  patchPage(a, { engineBack: { engine: "webkit", url: "https://z.com/" } });
+  const switching = setEngineMode("webkit");
+  assert.equal(useEngineModeSwitch.getState().pending, "webkit");
+  assert.equal(await switching, true);
+  assert.equal(S().settings.engineMode, "webkit");
+  for (const id of [a, b]) {
+    assert.equal(S().tabs[id].engine, "webkit");
+    assert.equal(tabEngine(S(), id), "webkit");
+    assert.deepEqual(useRetiringPages.getState()[id], { engine: "chromium" });
+    dropSwap(id);
   }
+  assert.equal(S().tabs[a].page.nav.url, "https://a.com/");
+  assert.equal(pageOf(a).engineBack, null);
+  assert.equal(useEngineModeSwitch.getState().pending, null);
+  webviews.clear();
+});
+
+test("a mode change asks once when a page has unsaved input, and Cancel leaves the mode and every tab alone", async () => {
+  S().hydrate({});
+  const a = liveTab("https://a.com/", "chromium", true);
+  assert.equal(await setEngineMode("webkit"), false);
+  assert.equal(S().settings.engineMode, "automatic");
+  assert.equal(S().tabs[a].engine, "chromium");
+  assert.equal(useRetiringPages.getState()[a], undefined);
+  webviews.clear();
+});
+
+test("a second mode change while the first waits on its prompt is refused, and the first still lands", async () => {
+  S().hydrate({});
+  const a = liveTab("https://a.com/", "chromium", true);
+  let answer;
+  shellNativeModules.ArdiaDialogs.confirm = () => new Promise((resolve) => (answer = resolve));
+  const first = setEngineMode("webkit");
+  for (let i = 0; i < 4 && !answer; i++) await settle();
+  assert.ok(answer);
+  const firstAnswer = answer;
+  assert.equal(await Promise.race([setEngineMode("chromium"), settle().then(() => "still running")]), false);
+  firstAnswer({ confirmed: true, suppressed: false });
+  assert.equal(await first, true);
+  assert.equal(S().settings.engineMode, "webkit");
+  assert.equal(S().tabs[a].engine, "webkit");
+  assert.equal(useEngineModeSwitch.getState().pending, null);
+  dropSwap(a);
+  shellNativeModules.ArdiaDialogs.confirm = confirmNo;
+  webviews.clear();
+});
+
+test("Chromium only offers no WebKit move for protected video and refuses a move to WebKit, and Automatic puts the streaming site back", async () => {
+  S().hydrate({});
+  const a = liveTab("https://www.netflix.com/watch/1", "webkit");
+  assert.equal(await setEngineMode("chromium"), true);
+  dropSwap(a);
+  assert.equal(tabEngine(S(), a), "chromium");
+  offerWebKit(a, { keySystem: "com.widevine.alpha", main: true });
+  await settle();
+  assert.deepEqual(useEngineOffers.getState(), {});
+  assert.equal(await openPageIn(a, "webkit"), false);
+  assert.equal(tabEngine(S(), a), "chromium");
+  assert.equal(await setEngineMode("automatic"), true);
+  dropSwap(a);
+  assert.equal(tabEngine(S(), a), "webkit");
+  webviews.clear();
+});
+
+test("leaving WebKit only puts each reloaded tab on its own site's engine, even one opened from another tab", async () => {
+  S().hydrate({});
+  S().updateSettings({ protectedVideoInWebKit: true });
+  const opener = liveTab("https://search.example/?q=film", "chromium");
+  const film = S().newTab(S().tabs[opener].windowId, { url: "https://www.netflix.com/watch/1", openerId: opener });
+  S().updateTab(film, { url: "https://www.netflix.com/watch/1" });
+  webviews.set(film, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
+  assert.equal(await setEngineMode("webkit"), true);
+  assert.equal(await setEngineMode("automatic"), true);
+  assert.equal(tabEngine(S(), opener), "chromium");
+  assert.equal(tabEngine(S(), film), "webkit");
+  for (const id of [opener, film]) dropSwap(id);
+  webviews.clear();
+});
+
+test("a mode change names how many pages lose unsaved changes, once, on the window it came from", async () => {
+  S().hydrate({});
+  liveTab("https://a.com/", "chromium", true);
+  liveTab("https://b.com/", "chromium", true);
+  liveTab("https://c.com/", "chromium", false);
+  const asked = [];
+  shellNativeModules.ArdiaDialogs.confirm = (options) => (asked.push(options), Promise.resolve({ confirmed: false, suppressed: false }));
+  assert.equal(await setEngineMode("webkit", { windowId: "settings" }), false);
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].title, "Switch to WebKit?");
+  assert.equal(asked[0].confirmTitle, "Switch to WebKit");
+  assert.match(asked[0].message, /^2 pages with unsaved changes reload/);
+  assert.equal(asked[0].windowId, "settings");
+  shellNativeModules.ArdiaDialogs.confirm = confirmNo;
+  webviews.clear();
+});
+
+test("a second move of the same tab while the first is under way is refused, and the first keeps its held page", async () => {
+  S().hydrate({});
+  const tabId = liveTab("https://a.com/", "chromium");
+  const first = openPageIn(tabId, "webkit");
+  assert.equal(await openPageIn(tabId, "webkit"), false);
+  assert.equal(await first, true);
+  assert.deepEqual(useRetiringPages.getState()[tabId], { engine: "chromium" });
+  dropSwap(tabId);
+  webviews.clear();
+});
+
+test("in Chromium only, a page whose protected video is refused gets one notice per site pointing at the Engine setting", async () => {
+  S().hydrate({});
+  const a = liveTab("https://cinema.example/watch/1", "chromium");
+  assert.equal(await setEngineMode("chromium"), true);
+  const w = S().tabs[a].windowId;
+  useToasts.setState({ toasts: {} });
+  offerWebKit(a, { keySystem: "com.widevine.alpha", main: true });
+  const toast = useToasts.getState().toasts[w];
+  assert.equal(toast?.title, "Protected video won't play in Chromium");
+  assert.equal(toast?.action?.title, "Open Settings");
+  assert.deepEqual(useEngineOffers.getState(), {});
+  useToasts.setState({ toasts: {} });
+  offerWebKit(a, { keySystem: "com.widevine.alpha", main: true });
+  assert.equal(useToasts.getState().toasts[w], undefined);
+  assert.equal(await setEngineMode("automatic"), true);
+  dropSwap(a);
+  webviews.clear();
+});
+
+test("a move waiting on its unsaved-input prompt gives up when Chromium only lands first, and never touches WebKit", async () => {
+  S().hydrate({});
+  const tabId = liveTab("https://a.com/", "chromium", true);
+  let answer;
+  shellNativeModules.ArdiaDialogs.confirm = () => new Promise((resolve) => (answer = resolve));
+  const moving = openPageIn(tabId, "webkit");
+  for (let i = 0; i < 4 && !answer; i++) await settle();
+  assert.ok(answer);
+  assert.equal(await setEngineMode("chromium"), true);
+  engineCalls.length = 0;
+  answer({ confirmed: true, suppressed: false });
+  assert.equal(await moving, false);
+  assert.deepEqual(engineCalls.filter((c) => c.domain === "webKit"), []);
+  assert.equal(S().tabs[tabId].engine, "chromium");
+  assert.equal(useRetiringPages.getState()[tabId], undefined);
+  shellNativeModules.ArdiaDialogs.confirm = confirmNo;
+  webviews.clear();
+});
+
+test("in WebKit only, a link from a Chromium page to a website moves the tab to WebKit with Back to the page before", async () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const w = S().createWindow({ url: "chrome://extensions/" });
+  const tabId = model.activeTabId(S(), w);
+  webviews.set(tabId, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  S().updateTab(tabId, { url: "https://developer.chrome.com/docs" });
+  followSiteChoice(tabId, "chromium", "https://developer.chrome.com/docs", "chrome://extensions/");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(tabEngine(S(), tabId), "webkit");
+  assert.equal(S().tabs[tabId].page.nav.url, "https://developer.chrome.com/docs");
+  assert.deepEqual(pageOf(tabId).engineBack, { engine: "chromium", url: "chrome://extensions/" });
+  dropSwap(tabId);
+  webviews.clear();
+});
+
+test("in WebKit only, a link from a website into the Web Store moves to Chromium, and the Web Store's own links stay there", async () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const w = S().createWindow({ url: "https://blog.example/" });
+  const tabId = model.activeTabId(S(), w);
+  webviews.set(tabId, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
+  assert.equal(tabEngine(S(), tabId), "webkit");
+  S().updateTab(tabId, { url: "https://chromewebstore.google.com/detail/abc" });
+  followSiteChoice(tabId, "webkit", "https://chromewebstore.google.com/detail/abc", "https://blog.example/");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  dropSwap(tabId);
+  S().updateTab(tabId, { url: "https://accounts.google.com/signin" });
+  followSiteChoice(tabId, "chromium", "https://accounts.google.com/signin", "https://chromewebstore.google.com/detail/abc");
+  for (let i = 0; i < 6; i++) await settle();
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  assert.equal(useRetiringPages.getState()[tabId], undefined);
+  webviews.clear();
+});
+
+test("in WebKit only, leaving the Web Store or its Google sign-in for another site moves the tab back to WebKit", async () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  for (const previous of ["https://chromewebstore.google.com/detail/abc", "https://accounts.google.com/signin"]) {
+    const w = S().createWindow({ url: "https://chromewebstore.google.com/detail/abc" });
+    const tabId = model.activeTabId(S(), w);
+    webviews.set(tabId, { evaluate: () => Promise.resolve(false), pageCookies: () => Promise.resolve([]) });
+    assert.equal(tabEngine(S(), tabId), "chromium");
+    S().updateTab(tabId, { url: "https://blog.example/next" });
+    followSiteChoice(tabId, "chromium", "https://blog.example/next", previous);
+    for (let i = 0; i < 6; i++) await settle();
+    assert.equal(tabEngine(S(), tabId), "webkit", previous);
+    dropSwap(tabId);
+  }
+  webviews.clear();
+});
+
+const { persistEngine } = await import("./actions.ts");
+const { flushPersistence, loadSession, startPersistence } = await import("../session/persist.ts");
+const stub = await import("../../test-native/index.ts");
+
+function chromeMadeTab() {
+  const w = S().createWindow({ url: "https://first.example/" });
+  const tabId = model.activeTabId(S(), w);
+  S().updateTab(tabId, { url: "https://cli.example/", page: { kind: "adopted", adopt: "tab:42", nav: null } });
+  persistEngine(tabId, "chromium");
+  return tabId;
+}
+
+test("in WebKit only, a tab Chrome opened (CDP or an extension) wakes from sleep and comes back after relaunch in Chromium", () => {
+  stub.docs.clear();
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const stop = startPersistence();
+  const tabId = chromeMadeTab();
+  assert.equal(S().tabs[tabId].chromeOpened, true);
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  S().updateTab(tabId, { page: { kind: "asleep" } });
+  assert.equal(tabEngine(S(), tabId), "chromium");
+  flushPersistence();
+  stop();
+  S().hydrate(loadSession());
+  assert.equal(S().tabs[tabId].chromeOpened, true);
+  assert.equal(S().tabs[tabId].page.kind === "adopted", false);
+  assert.equal(tabEngine(S(), tabId), "chromium");
+});
+
+test("a page opened by a Chrome-opened tab is marked too, and typing an address in either moves it to WebKit", () => {
+  S().hydrate({});
+  S().updateSettings({ engineMode: "webkit" });
+  const opener = chromeMadeTab();
+  const w = S().tabs[opener].windowId;
+  const popup = S().newTab(w, { url: "https://popup.example/", adoptId: "ardiacore:5", openerId: opener });
+  persistEngine(popup, "chromium");
+  assert.equal(S().tabs[popup].chromeOpened, true);
+  S().updateTab(popup, { page: { kind: "asleep" }, openerId: null });
+  assert.equal(tabEngine(S(), popup), "chromium");
+  S().navigate(opener, "https://typed.example/", { userInitiated: true });
+  assert.equal(S().tabs[opener].chromeOpened, undefined);
+  assert.equal(tabEngine(S(), opener), "webkit");
+});
+
+test("a tab the app opened is never marked as Chrome's", () => {
+  S().hydrate({});
+  const w = S().createWindow({ url: "https://mine.example/" });
+  const tabId = model.activeTabId(S(), w);
+  persistEngine(tabId, "chromium");
+  assert.equal(S().tabs[tabId].chromeOpened, undefined);
+  S().updateSettings({ engineMode: "webkit" });
+  assert.equal(tabEngine(S(), tabId), "webkit");
 });
