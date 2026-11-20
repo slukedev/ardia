@@ -125,6 +125,8 @@ const TOP = [
   ["thme", ["appearance.theme"]],
   ["upscalling", ["tabs.videoUpscaling"]],
   ["extensoins", ["profiles.extensions", "profiles.webStore"]],
+  ["safe browsing", ["advanced.webKitFraudWarnings"]],
+  ["phishing", ["advanced.webKitFraudWarnings"]],
   ["unsaved", ["advanced.engineSwitchAsksAboutUnsavedWork"]],
   ["seamless", ["advanced.engineSwitchKeepsPage"]],
   ["drm prompt", ["advanced.offerWebKitForProtectedVideo"]],
@@ -316,11 +318,11 @@ test("a row its pane doesn't draw is left out of search, by the same rule the pa
   assert.ok(unshown({ addressBar: "sidebar" }, { top: false }).has("appearance.compactToolbar"));
   assert.ok(!unshown({ addressBar: "sidebar" }, { top: true }).has("appearance.compactToolbar"));
   const chromiumOnly = unshown({ engineMode: "chromium" }, { top: false });
-  for (const id of ["advanced.pageEngine", "advanced.websiteEngines", "advanced.enginesDiffer", "advanced.offerWebKitForProtectedVideo"]) assert.ok(chromiumOnly.has(id), id);
+  for (const id of ["advanced.pageEngine", "advanced.websiteEngines", "advanced.enginesDiffer", "advanced.offerWebKitForProtectedVideo", "advanced.webKitFraudWarnings"]) assert.ok(chromiumOnly.has(id), id);
   for (const id of ["general.engineMode", "advanced.engineSwitchKeepsPage", "advanced.engineSwitchAsksAboutUnsavedWork"]) assert.ok(!chromiumOnly.has(id), id);
   const webkitOnly = unshown({ engineMode: "webkit" }, { top: false });
   for (const id of ["advanced.pageEngine", "advanced.websiteEngines", "advanced.offerWebKitForProtectedVideo"]) assert.ok(webkitOnly.has(id), id);
-  for (const id of ["general.engineMode", "advanced.enginesDiffer"]) assert.ok(!webkitOnly.has(id), id);
+  for (const id of ["general.engineMode", "advanced.enginesDiffer", "advanced.webKitFraudWarnings"]) assert.ok(!webkitOnly.has(id), id);
 });
 
 const SHOWN_BY_LOADED_DATA = ["UpdatesSection.tsx: general.autoUpdate", "UpdatesSection.tsx: general.updateChannel"];

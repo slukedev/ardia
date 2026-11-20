@@ -144,6 +144,10 @@ jobs:
         with:
           path: packages/ardiacore/vendor/ubol-webkit
           key: ubol-webkit-${{ hashFiles('packages/ardiacore/scripts/ubol.sh', 'packages/ardiacore/scripts/ubol-webkit.py') }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: packages/ardiacore/vendor/hsts-preload
+          key: hsts-preload-${{ hashFiles('packages/ardiacore/scripts/hsts-preload.sh', 'packages/ardiacore/scripts/hsts-preload.py') }}
       - name: Pods
         working-directory: apps/browser/macos
         run: pod install

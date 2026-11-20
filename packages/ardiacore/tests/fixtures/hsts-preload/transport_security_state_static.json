@@ -1,0 +1,15 @@
+// Copyright 2012 The Chromium Authors
+// A trimmed copy of Chromium's preload list.
+{
+  "entries": [
+    // Comment lines inside the list are stripped too.
+    { "name": "dev", "policy": "public-suffix", "mode": "force-https", "include_subdomains": true },
+    { "name": "Google.com", "policy": "google", "mode": "force-https", "include_subdomains": true },
+    { "name": "exact-only.example", "policy": "custom", "mode": "force-https" },
+    { "name": "pins-only.example", "policy": "custom", "pins": "google" },
+    { "name": "bücher.example", "policy": "custom", "mode": "force-https", "include_subdomains": true },
+    { "name": "test-only.test", "policy": "test", "mode": "force-https", "include_subdomains": true },
+    { "name": "aa.example", "policy": "bulk-1-year", "mode": "force-https", "include_subdomains": true },
+    { "name": "a-b.example", "policy": "bulk-1-year", "mode": "force-https", "include_subdomains": true }
+  ]
+}

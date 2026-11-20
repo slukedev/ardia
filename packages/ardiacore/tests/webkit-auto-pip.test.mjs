@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { runSwiftTests } from "./swift-testing.mjs";
 import { runInNewContext } from "node:vm";
+import { webKitPageScript } from "./webkit-page-source.mjs";
 
 const path = (name) => fileURLToPath(new URL(name, import.meta.url));
 const sources = [
@@ -25,10 +24,6 @@ const pageTab = read("../ios/WebKitTab+PageTab.swift");
 const webView = read("../ios/WebKitWebView.swift");
 const windowHostHeader = read("../ios/ArdiaChromeWindowHost.h");
 const windowHost = read("../ios/ArdiaChromeWindowHost.mm");
-const swiftc = process.env.SWIFTC || "swiftc";
-const pageScriptSwift = read("../ios/WebKitPageScript.swift");
-const chromiumPageScript = read("../ios/page_script.js");
-const fieldProviderKit = chromiumPageScript.slice(chromiumPageScript.indexOf("  const fieldProviderKit = "), chromiumPageScript.indexOf("  const nativeMutationObserver = "));
 
 function pageWithVideos(videos) {
   const noop = () => {};
@@ -45,8 +40,7 @@ function pageWithVideos(videos) {
   const window = { document, addEventListener: noop, location: { protocol: "https:", origin: "https://example.test" }, navigator: {}, performance: { now: () => 0 }, setTimeout: noop, requestAnimationFrame: noop, EventTarget: class { addEventListener() {} } };
   window.window = window;
   window.top = window;
-  const source = pageScriptSwift.slice(pageScriptSwift.indexOf('#"""') + 4, pageScriptSwift.indexOf('"""#')).replace("\\#(WebKitMediaFaults.sitesJSON)", "[]").replace("\\#(fieldProviderKit)", () => fieldProviderKit);
-  runInNewContext(source, window);
+  runInNewContext(webKitPageScript.replace("\\#(WebKitMediaFaults.sitesJSON)", "[]"), window);
   return window.__ardia;
 }
 
@@ -67,22 +61,38 @@ test("every source the checks read exists", () => {
 
 test("WebKit tabs keep the autoPictureInPicture flag instead of a stub that reads false", () => {
   assert.doesNotMatch(pageTab, /var autoPictureInPicture\b[^\n]*get \{ false \}/);
-  assert.match(tab, /^ {2}var autoPictureInPicture = false$/m);
+  assert.match(tab, /^ {2}var autoPictureInPicture = false \{ didSet \{ autoPictureInPictureInputsChanged\(\) \} \}$/m);
 });
 
 test("WebKit tabs follow the user's sight of their window the way Chromium views do", () => {
-  assert.match(sight, /let seen = visible && ArdiaChromeWindowHost\.userSees\(window\)/);
+  assert.match(sight, /return visible && ArdiaChromeWindowHost\.userSees\(window\)/);
   assert.match(sight, /forName: (?:NSNotification\.Name\.)?ArdiaWindowSeenDidChange, object: window/);
-  assert.match(sight, /let activeCapture = webView\?\.cameraCaptureState == \.active \|\| webView\?\.microphoneCaptureState == \.active/);
-  assert.match(sight, /playing: !playingFrames\.isEmpty \|\| activeCapture/);
-  assert.match(tab, /override func viewDidMoveToWindow\(\) \{\n    super\.viewDidMoveToWindow\(\)\n    if window != nil \{ followInterfaceScale\(\) \}\n    watchSight\(\)\n  \}/);
-  assert.match(tab, /var visible = true \{ didSet \{ updateHidden\(\); updateSight\(\); noteShownChanged\(\) \} \}/);
+  assert.match(sight, /return !playingFrames\.isEmpty \|\| view\.cameraCaptureState == \.active \|\| view\.microphoneCaptureState == \.active/);
+  assert.match(sight, /playing: playsMedia\)/);
+  const movedStart = tab.indexOf("override func viewDidMoveToWindow() {");
+  assert.ok(movedStart >= 0, "viewDidMoveToWindow not found");
+  const moved = tab.slice(movedStart, tab.indexOf("\n  }\n", movedStart));
+  assert.match(moved, /^ {4}super\.viewDidMoveToWindow\(\)$/m);
+  assert.match(moved, /^ {4}if window != nil \{ followInterfaceScale\(\) \}$/m);
+  assert.match(moved, /^ {4}watchSight\(\)$/m);
+  assert.match(tab, /^ {2}var visible = true \{ didSet \{[^\n]*\bupdateSight\(\)[^\n]*\} \}$/m);
+  assert.match(tab, /^ {2}var visible = true \{ didSet \{[^\n]*\bnoteShownChanged\(\)[^\n]*\} \}$/m);
+});
+
+test("WebKit tabs report why automatic picture in picture held back, as Chromium views do", () => {
+  assert.match(sight, /let kept = seen && ArdiaChromeWindowHost\.userSeesOnlyThroughWindowServer\(window\)/);
+  assert.match(sight, /emit\("autoPictureInPictureKept", ArdiaConsentStamp\.begin\(\)\.onto\(\["appSwitch": false\]\)\)/);
+  assert.match(sight, /note\.userInfo\?\[Self\.leftAppKey\] as\? Bool\) == true \{ self\?\.noteStayedOnAppSwitch\(\) \}/);
+  assert.match(sight, /emit\("autoPictureInPictureKept", ArdiaConsentStamp\.begin\(\)\.onto\(\["appSwitch": true\]\)\)/);
+  assert.match(sight, /ArdiaChromeWindowHost\.playsForAutoPictureInPictureHandler = \{ window in/);
+  assert.match(windowHostHeader, /\+ \(BOOL\)userSeesOnlyThroughWindowServer:\(nullable NSWindow \*\)window NS_SWIFT_NAME\(userSeesOnlyThroughWindowServer\(_:\)\);/);
+  assert.match(read("../ios/ArdiaWebView+PictureInPicture.mm"), /BOOL \(\^webKitPlays\)\(NSWindow \*\) = ArdiaChromeWindowHost\.playsForAutoPictureInPictureHandler;\n\s+return webKitPlays && webKitPlays\(window\);/);
 });
 
 test("leaving opens picture in picture and returning closes it through the page's own player call", () => {
   assert.match(sight, /case \.open:\s*let stamp = ArdiaConsentStamp\.begin\(\)\s*setPictureInPicture\(true, automatic: true\) \{ \[weak self\] answer in if answer == \.nothingPlaying \{ self\?\.emit\("autoPictureInPictureKept", stamp\.onto\(\["reason": "nothingPlaying"\]\)\) \} \}/);
   assert.match(sight, /case \.close: setPictureInPicture\(false\) \{ _ in \}/);
-  assert.match(sight, /autoPictureInPictureRule\.sight\(seen, enabled: autoPictureInPicture, playing: !playingFrames\.isEmpty \|\| activeCapture\)/);
+  assert.match(sight, /autoPictureInPictureRule\.sight\(seen, enabled: autoPictureInPicture, playing: playsMedia\)/);
 });
 
 test("the page's picture in picture reports reach the rule", () => {
@@ -103,8 +113,8 @@ test("the rule travels with the page view, so a tab that takes the view over sti
     sight,
     /var autoPictureInPictureRule: WebKitAutoPictureInPicture \{\n\s+get \{ webView\?\.autoPictureInPictureRule \?\? WebKitAutoPictureInPicture\(\) \}\n\s+set \{ webView\?\.autoPictureInPictureRule = newValue \}\n\s+\}/,
   );
-  const attach = tab.slice(tab.indexOf("private func attach(_ view: WebKitWebView) {"), tab.indexOf("private func observe("));
-  assert.match(attach, /webView = view\n[\s\S]*\n {4}updateSight\(\)\n {2}\}/);
+  const attach = tab.slice(tab.indexOf("func attach(_ view: WebKitWebView) {"), tab.indexOf("private func observe("));
+  assert.match(attach, /webView = view\n[\s\S]*\n {4}updateSight\(\)\n {4}pushFieldProvider\(\)\n {2}\}/);
 });
 
 test("ArdiaCore's public window host gives Swift the same sight rule as Chromium views", () => {
@@ -113,23 +123,8 @@ test("ArdiaCore's public window host gives Swift the same sight rule as Chromium
   assert.match(windowHost, /\+ \(BOOL\)userSeesWindow:\(NSWindow \*\)window \{\n\s+return \[ArdiaWindowController userSees:window\];/);
 });
 
-test("the leave and return rule opens once per leave and closes on return", (t) => {
-  const probe = spawnSync(swiftc, ["--version"], { encoding: "utf8" });
-  if (probe.error || probe.status !== 0) return t.skip("swiftc is not available");
-  const dir = mkdtempSync(join(tmpdir(), "ardia-auto-pip-"));
-  try {
-    const binary = join(dir, "auto-pip-test");
-    const built = spawnSync(
-      swiftc,
-      ["-parse-as-library", path("../ios/WebKitAutoPictureInPicture.swift"), path("./webkit-auto-pip.test.swift"), "-o", binary],
-      { encoding: "utf8" },
-    );
-    assert.equal(built.status, 0, built.stderr);
-    const ran = spawnSync(binary, { encoding: "utf8" });
-    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+test("the leave and return rule opens once per leave and closes on return (Swift Testing)", (t) => {
+  runSwiftTests(t, "auto-pip-test", ["../ios/WebKitAutoPictureInPicture.swift", "./webkit-auto-pip.test.swift"]);
 });
 
 test("automatic picture in picture leaves a paused video where it is", () => {

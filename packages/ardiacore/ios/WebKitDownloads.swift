@@ -31,6 +31,7 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     weak var webView: WKWebView?
     let url: String
     let profile: String
+    var referrer: URL?
     var request: URLRequest?
     var phase = Phase.running
     var filename = ""
@@ -61,7 +62,7 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
   private let fallbackFolder: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
     ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
 
-  private func resolveDestination(for profile: String, completion: @escaping (URL, Bool) -> Void) {
+  func resolveDestination(for profile: String, completion: @escaping (URL, Bool) -> Void) {
     ArdiaEngineBridge.call("ac_downloads_settings", profile: ArdiaHost.baseProfile(of: profile), args: nil) { [weak self] json in
       let parsed = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any]
       let folder = (parsed?["folder"] as? String).flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
@@ -76,6 +77,7 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
   func adopt(_ download: WKDownload, profile: String, webView: WKWebView?) {
     let item = Item(url: download.originalRequest?.url?.absoluteString ?? "", profile: profile)
     item.webView = webView
+    item.referrer = webView?.backForwardList.currentItem?.url
     item.request = download.originalRequest
     attach(download, to: item)
     items[item.id] = item
@@ -181,10 +183,11 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
       report(item)
       return completionHandler(file)
     }
-    let name = Self.safeName(suggestedFilename.isEmpty ? (response.suggestedFilename ?? "download") : suggestedFilename)
+    let name = WebKitDownloadNames.safe(suggestedFilename.isEmpty ? (response.suggestedFilename ?? "download") : suggestedFilename)
     item.mimeType = response.mimeType ?? ""
     item.total = max(0, response.expectedContentLength)
     let accept = { (target: URL?, replacing: Bool) in
+      guard !item.phase.isDone else { return completionHandler(nil) }
       guard let target, let staging = Self.makeStaging(in: target.deletingLastPathComponent(), uuid: item.uuid) else {
         item.phase = target == nil ? .cancelled : .failed
         self.report(item)
@@ -212,10 +215,12 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
   func downloadDidFinish(_ download: WKDownload) {
     guard let item = item(for: download) else { return }
     detach(item)
+    if let file = item.stagingFile { Self.markDownloaded(file, source: URL(string: item.url), referrer: item.referrer, profile: item.profile) }
     if let file = item.stagingFile, let final = item.final, let placed = Self.place(file, at: final, replacing: item.replaces) {
       item.path = placed.path
       item.filename = placed.lastPathComponent
       item.phase = .finished
+      Self.markDownloaded(placed, source: URL(string: item.url), referrer: item.referrer, profile: item.profile)
       let size = ((try? FileManager.default.attributesOfItem(atPath: placed.path))?[.size] as? NSNumber)?.int64Value
       if let size {
         item.received = size
@@ -306,9 +311,38 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     }
   }
 
-  static func safeName(_ name: String) -> String {
-    let cleaned = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
-    let trimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: ". ").union(.whitespacesAndNewlines))
-    return trimmed.isEmpty ? "download" : trimmed
+  static func quarantineURL(_ url: URL?) -> URL? {
+    guard let url, ["http", "https", "ftp"].contains(url.scheme?.lowercased() ?? ""),
+      var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    else { return nil }
+    parts.user = nil
+    parts.password = nil
+    return parts.url
+  }
+
+  static func markDownloaded(_ file: URL, source: URL?, referrer: URL?, profile: String) {
+    let origins = WebKitStores.isPrivate(profile) ? [] : [quarantineURL(source), quarantineURL(referrer)].compactMap { $0 }
+    var properties: [String: Any] = [
+      kLSQuarantineAgentNameKey as String: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? ProcessInfo.processInfo.processName,
+      kLSQuarantineTypeKey as String: kLSQuarantineTypeWebDownload as String,
+      kLSQuarantineTimeStampKey as String: Date(),
+    ]
+    if let bundle = Bundle.main.bundleIdentifier { properties[kLSQuarantineAgentBundleIdentifierKey as String] = bundle }
+    if let data = origins.first { properties[kLSQuarantineDataURLKey as String] = data }
+    if origins.count > 1 { properties[kLSQuarantineOriginURLKey as String] = origins[1] }
+    var values = URLResourceValues()
+    values.quarantineProperties = properties
+    var target = file
+    do {
+      try target.setResourceValues(values)
+    } catch {
+      NSLog("[webkit] quarantine not set on a download: \(error.localizedDescription)")
+      ArdiaEvents.emit("webKit.counted", data: ArdiaConsentStamp.begin().onto(["name": "quarantineFailure"]))
+    }
+    guard !origins.isEmpty,
+      let plist = try? PropertyListSerialization.data(fromPropertyList: origins.map(\.absoluteString), format: .binary, options: 0)
+    else { return }
+    let set = plist.withUnsafeBytes { setxattr(file.path, "com.apple.metadata:kMDItemWhereFroms", $0.baseAddress, plist.count, 0, XATTR_NOFOLLOW) }
+    if set != 0 { NSLog("[webkit] Where From not set on a download (errno \(errno))") }
   }
 }

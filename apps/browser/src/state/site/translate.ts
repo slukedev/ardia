@@ -11,6 +11,8 @@ import { stopDocumentWatch, watchDocument } from "./documentWatch";
 import { drainPassages, type PageBatch, type Passage, type Translated } from "./translateDrain";
 import { errorText } from "../../lib/errors";
 import { capture, consentToken, type ConsentToken } from "../telemetry/client";
+import { noteWebKitCount } from "../telemetry/engineSwitchCounts";
+import { tabEngine } from "../engines/engines";
 
 export { translation } from "../../platform/text";
 
@@ -233,6 +235,7 @@ export async function translatePage(tabId: string, target = defaultTarget()) {
       return void reportFirstPass("stopped", started, progress, consent);
     }
     reportFirstPass("done", started, progress, consent);
+    if (tabEngine(useBrowser.getState(), tabId) === "webkit") noteWebKitCount("translation", consent);
     if (holds(tabId, mine)) set(tabId, { status: "translated", source, target, token: mine });
     toast(tabId, `Translated to ${languageName(target)}`);
     void follow(tabId, mine);

@@ -109,6 +109,7 @@ class WebKitHub {
 struct ChromiumPageEngine: PageEngine { ${chromium} }
 struct WebKitPageEngine: PageEngine {
   var hub: WebKitHub { WebKitHub.shared }
+  static func hasData(_ profile: String) -> Bool { true }
   ${webKit}
 }
 enum PageEngines {

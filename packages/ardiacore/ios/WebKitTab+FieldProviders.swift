@@ -33,7 +33,7 @@ extension WebKitTab {
         let token = offer["token"] as? String, let app = offer["app"] as? String
       else { return }
       emit("verificationCodeFound", ["token": token, "app": app, "main": true])
-    default: break
+    default: siteMessage(kind, data: dict, frameInfo: frameInfo)
     }
   }
 

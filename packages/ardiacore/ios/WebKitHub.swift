@@ -4,15 +4,29 @@ import WebKit
 
 final class WebKitHub: NSObject, WKScriptMessageHandler {
   static let shared = WebKitHub()
+  private(set) static var started = false
   static let world = WKContentWorld.world(name: "ardia")
   static let silenced = LaunchConfig.shared.background && !LaunchConfig.shared.instanceFlag("allowAudio")
 
   let downloads = WebKitDownloads()
   let stores = WebKitStores()
   let transfers = WebKitTransfers()
+  let logins = WebKitLogins()
+  let notifications = WebKitNotifications()
+  let certificates = WebKitCertificates()
   private(set) lazy var permissions = WebKitPermissions(stores: stores, transfers: transfers)
   private(set) lazy var externalApps = WebKitExternalApps(stores: stores)
   private var lastBrowserId: Int32 = -1000
+
+  override init() {
+    super.init()
+    Self.started = true
+  }
+
+  static func endPrivateSessionIfStarted(_ name: String) {
+    guard started else { return }
+    shared.endPrivateSession(name)
+  }
 
   func nextBrowserId() -> Int32 {
     lastBrowserId -= 1
@@ -29,16 +43,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     return "18.6"
   }()
 
-  static let inspectable: Bool = {
-    if LaunchConfig.shared.dataDirectory != nil { return true }
-    var code: SecCode?
-    guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return true }
-    var info: CFDictionary?
-    guard SecCodeCopySigningInformation(code as! SecStaticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-      let info = info as? [String: Any]
-    else { return true }
-    return info[kSecCodeInfoTeamIdentifier as String] == nil
-  }()
+  static let inspectable = true
 
   static let passkeysEntitled: Bool = {
     guard let task = SecTaskCreateFromSelf(nil) else { return false }
@@ -76,6 +81,10 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     controller.addUserScript(WKUserScript(source: WebKitPageScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Self.world))
     controller.add(self, contentWorld: Self.world, name: "ardia")
     controller.addUserScript(WKUserScript(source: WebKitPageScript.mediaBridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+    controller.addUserScript(WKUserScript(source: WebKitLogins.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Self.world))
+    WebKitAutofill.attach(controller)
+    controller.addUserScript(WKUserScript(source: WebKitNotifications.worldBridge, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Self.world))
+    controller.addUserScript(WKUserScript(source: WebKitNotifications.pageShim, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
     if !Self.passkeysEntitled {
       controller.addUserScript(WKUserScript(source: Self.hidePasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
     }
@@ -84,12 +93,17 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     config.applicationNameForUserAgent = "Version/\(Self.safariVersion) Safari/605.1.15"
     config.mediaTypesRequiringUserActionForPlayback = []
     config.allowsAirPlayForMediaPlayback = true
-    config.preferences.isElementFullscreenEnabled = !LaunchConfig.shared.background
-    Self.allowPictureInPicture(config.preferences)
-    config.preferences.javaScriptCanOpenWindowsAutomatically = false
-    config.preferences.isFraudulentWebsiteWarningEnabled = false
+    Self.applyBasePreferences(config.preferences)
+    config.upgradeKnownHostsToHTTPS = true
     config.defaultWebpagePreferences.preferredContentMode = .desktop
     return config
+  }
+
+  static func applyBasePreferences(_ preferences: WKPreferences) {
+    preferences.isElementFullscreenEnabled = !LaunchConfig.shared.background
+    allowPictureInPicture(preferences)
+    preferences.javaScriptCanOpenWindowsAutomatically = true
+    preferences.isFraudulentWebsiteWarningEnabled = WebKitFraudWarnings.enabled
   }
 
   private static func allowPictureInPicture(_ preferences: WKPreferences) {
@@ -105,6 +119,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   }
 
   static func close(_ webView: WKWebView) {
+    WebKitHeldPopup.cancel(webView)
     WebKitHub.shared.transfers.unregister(webView)
     webView.navigationDelegate = nil
     webView.uiDelegate = nil
@@ -133,6 +148,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   func endPrivateSession(_ name: String) {
     guard let ended = stores.endPrivateSession(name) else { return }
     closeViews(using: ended.store, id: ended.id)
+    certificates.forget(ended.id)
     ended.store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
   }
 
@@ -141,6 +157,9 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   ])
 
   func clearBrowsingData(profile: String, types: [String], since: Double, completion: @escaping () -> Void) {
+    if types.contains("history") { WebKitTabHistory.cleared(profile: profile, live: transfers.liveTabs) }
+    if types.contains("siteData") { certificates.forgetTransportSecurity(profile: profile) }
+    guard stores.hasStore(for: profile) else { return completion() }
     var kinds = Set<String>()
     if types.contains("siteData") { kinds.formUnion(Self.siteDataTypes) }
     if types.contains("cache") { kinds.formUnion([WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache]) }
@@ -155,6 +174,7 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
   }
 
   func clearSiteData(profile: String, host rawHost: String, completion: @escaping ([String: Any]) -> Void) {
+    guard stores.hasStore(for: profile) else { return completion(["cookies": 0, "storage": true]) }
     let store = stores.dataStore(for: profile)
     let host = rawHost.lowercased()
     store.fetchDataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()) { records in
@@ -172,6 +192,8 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     guard !WebKitStores.isPrivate(profile) else { return completion(true) }
     let identifier = WebKitStores.storeIdentifier(profile)
     let removed = stores.forgetProfile(profile)
+    WebKitTabHistory.forget(profile: profile)
+    certificates.forgetTransportSecurity(profile: profile)
     downloads.cancelAll(profile: profile)
     if let host = stores.takeResumeHost(of: profile) { Self.close(host) }
     let removeStore = {

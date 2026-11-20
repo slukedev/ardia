@@ -6,6 +6,10 @@
 
 using namespace ardia_web_view;
 
+@protocol ArdiaScrollZoomPage
+- (void)zoomByCommandScroll:(NSInteger)direction;
+@end
+
 namespace {
 
 int gDevTrackpad = -1;
@@ -81,11 +85,36 @@ int DirectionOf(double delta) {
   return (delta > 0) - (delta < 0);
 }
 
-ArdiaWebView *PageViewAt(NSWindow *window, NSPoint inWindow) {
+NSView *EnginePageViewAt(NSWindow *window, NSPoint inWindow) {
   NSView *content = window.contentView;
   NSView *hit = content ? [content hitTest:[content.superview convertPoint:inWindow fromView:nil]] : nil;
-  while (hit && ![hit isKindOfClass:ArdiaWebView.class]) hit = hit.superview;
-  return (ArdiaWebView *)hit;
+  while (hit && ![hit isKindOfClass:ArdiaWebView.class] && ![hit respondsToSelector:@selector(zoomByCommandScroll:)]) hit = hit.superview;
+  return hit;
+}
+
+ArdiaWebView *PageViewAt(NSWindow *window, NSPoint inWindow) {
+  NSView *hit = EnginePageViewAt(window, inWindow);
+  return [hit isKindOfClass:ArdiaWebView.class] ? (ArdiaWebView *)hit : nil;
+}
+
+void ZoomWebKitPageByScroll(NSView<ArdiaScrollZoomPage> *page, double delta) {
+  gZoomScrolls++;
+  gZoomAccumulated += delta;
+  if (fabs(gZoomAccumulated) < kZoomStepDelta) return;
+  [page zoomByCommandScroll:gZoomAccumulated > 0 ? 1 : -1];
+  gZoomAccumulated = 0;
+}
+
+NSView *VisibleWebKitPage(NSWindow *window) {
+  NSMutableArray<NSView *> *views = [NSMutableArray arrayWithObject:window.contentView ?: [NSView new]];
+  while (views.count) {
+    NSView *view = views.lastObject;
+    [views removeLastObject];
+    if (view.isHidden) continue;
+    if ([view respondsToSelector:@selector(zoomByCommandScroll:)] && !view.isHiddenOrHasHiddenAncestor && NSWidth(view.bounds) > 0) return view;
+    [views addObjectsFromArray:view.subviews];
+  }
+  return nil;
 }
 
 NSWindow *AppWindowAt(NSPoint screen) {
@@ -242,7 +271,14 @@ NSWindow *AppWindowAt(NSPoint screen) {
       window = AppWindowAt(point);
       point = [window convertPointFromScreen:point];
     }
-    ArdiaWebView *view = PageViewAt(window, point);
+    NSView *hit = EnginePageViewAt(window, point);
+    if (hit && ![hit isKindOfClass:ArdiaWebView.class]) {
+      if (event.phase == NSEventPhaseBegan) gZoomAccumulated = 0;
+      gZoomCandidates++;
+      ZoomWebKitPageByScroll((NSView<ArdiaScrollZoomPage> *)hit, event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * kWheelLineDelta);
+      return nil;
+    }
+    ArdiaWebView *view = (ArdiaWebView *)hit;
     if (gDevTrackpad >= 0 && (!view || !view->_tab))
       gDevZoomMiss = [NSString stringWithFormat:@"not over a page: window %ld %@, hit %@", (long)window.windowNumber, NSStringFromPoint(point),
                                                 [window.contentView hitTest:[window.contentView.superview convertPoint:point fromView:nil]]];
@@ -265,17 +301,21 @@ NSWindow *AppWindowAt(NSPoint screen) {
     if (v.window.isVisible && !v.isHiddenOrHasHiddenAncestor && v->_tab && v->_visible &&
         (!browserId || ardia_host::BrowserId(v->_tab) == browserId))
       view = v;
-  if (!view) return @[];
-  NSWindow *window = view.window;
-  const NSRect b = view.bounds;
+  NSView *page = view;
+  if (!page)
+    for (NSWindow *candidate in NSApp.orderedWindows)
+      if (candidate.isVisible && (page = VisibleWebKitPage(candidate))) break;
+  if (!page) return @[];
+  NSWindow *window = page.window;
+  const NSRect b = page.bounds;
   NSView *content = window.contentView;
-  NSPoint inWindow = [view convertPoint:NSMakePoint(NSMidX(b), NSMidY(b)) toView:nil];
+  NSPoint inWindow = [page convertPoint:NSMakePoint(NSMidX(b), NSMidY(b)) toView:nil];
   BOOL uncovered = NO;
   for (int i = 1; i < 8; i++)
     for (int j = 1; j < 8; j++) {
-      const NSPoint candidate = [view convertPoint:NSMakePoint(NSMinX(b) + NSWidth(b) * j / 8, NSMinY(b) + NSHeight(b) * i / 8) toView:nil];
+      const NSPoint candidate = [page convertPoint:NSMakePoint(NSMinX(b) + NSWidth(b) * j / 8, NSMinY(b) + NSHeight(b) * i / 8) toView:nil];
       NSView *hit = [content hitTest:[content.superview convertPoint:candidate fromView:nil]];
-      while (hit && hit != view) hit = hit.superview;
+      while (hit && hit != page) hit = hit.superview;
       if (hit) {
         inWindow = candidate;
         uncovered = YES;

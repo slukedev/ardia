@@ -7,6 +7,8 @@ import { trackAppVersion } from "../releaseNotes/releaseNotes";
 import { afterFirstWindow } from "../../lib/afterFirstWindow";
 import { offerDefaultBrowserAgain } from "../onboarding/defaultBrowserOffer";
 import { openReleaseNotesAfterUpdate } from "../releaseNotes/releaseNotesPage";
+import { startWebKitNotifications } from "../site/webKitNotificationEvents";
+import { startWebKitCounts } from "../telemetry/engineSwitchCounts";
 import { startNotificationResponses } from "./notificationResponses";
 import { startHandoff } from "./handoff";
 import { startScripting } from "./scripting";
@@ -16,6 +18,10 @@ import { warnFor } from "../telemetry/logs";
 
 export function startAppIntegration() {
   startNotificationResponses();
+  if (PLATFORM_FEATURES.webKit) {
+    startWebKitNotifications();
+    startWebKitCounts();
+  }
   startHandoff();
   startScripting();
   const updated = trackAppVersion();

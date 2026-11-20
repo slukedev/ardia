@@ -267,7 +267,7 @@ export type WebViewHandle = {
   find(text: string, forward: boolean, findNext: boolean): Promise<void>;
   stopFinding(clearSelection: boolean): Promise<void>;
   print(): Promise<void>;
-  runPageCommand(name: "savePage" | "systemPrint" | "caretBrowsing"): Promise<void>;
+  runPageCommand(name: "savePage" | "systemPrint" | "caretBrowsing" | "viewSource"): Promise<void>;
   showDevTools(panel?: string): Promise<void>;
   executeJavaScript(code: string): Promise<void>;
   evaluate<T = unknown>(code: string): Promise<T | null>;

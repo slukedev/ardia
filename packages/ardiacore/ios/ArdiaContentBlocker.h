@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)removeList:(NSString *)listId completion:(void (^)(NSString *_Nullable error))completion NS_SWIFT_NAME(removeList(_:completion:));
 + (void)isAllowedOnHost:(NSString *)host completion:(void (^)(BOOL allowed))completion NS_SWIFT_NAME(isAllowed(host:completion:));
 + (void)setAllowed:(BOOL)allowed onHost:(NSString *)host completion:(void (^)(NSString *_Nullable error))completion NS_SWIFT_NAME(setAllowed(_:host:completion:));
++ (void)userFilters:(void (^)(NSDictionary<NSString *, id> *_Nullable filters, NSString *_Nullable error))completion NS_SWIFT_NAME(userFilters(_:));
 + (void)hiddenElementsInProfile:(NSString *)profile completion:(void (^)(NSArray<NSString *> *_Nullable filters, NSString *_Nullable error))completion NS_SWIFT_NAME(hiddenElements(profile:completion:));
 + (void)hideElements:(NSArray<NSString *> *)filters inProfile:(NSString *)profile completion:(void (^)(NSString *_Nullable error))completion NS_SWIFT_NAME(hideElements(_:profile:completion:));
 + (void)restoreElements:(NSArray<NSString *> *)filters inProfile:(NSString *)profile completion:(void (^)(NSString *_Nullable error))completion NS_SWIFT_NAME(restoreElements(_:profile:completion:));

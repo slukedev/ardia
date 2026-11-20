@@ -13,19 +13,19 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
   var initialURL: String?
   var adoptId: String?
   var transferKey: String?
-  var visible = true { didSet { updateHidden(); updateSight(); noteShownChanged() } }
+  var visible = true { didSet { updateHidden(); wakeIfShown(was: oldValue); updateSight(); noteShownChanged(); showNextDialog(); if !visible { WebKitHub.shared.logins.closeDropdowns(for: self) } } }
   var selected = true { didSet { noteShownChanged() } }
   var wasShown = true
-  var autoPictureInPicture = false
+  var autoPictureInPicture = false { didSet { autoPictureInPictureInputsChanged() } }
   var pageBackgroundColor: NSColor? { didSet { if let color = pageBackgroundColor { webView?.underPageBackgroundColor = color } } }
   let browserId = WebKitHub.shared.nextBrowserId()
 
   private(set) var webView: WebKitWebView?
-  private var observations: [NSKeyValueObservation] = []
+  private var observations: [NSObject] = []
   private var started = false
   private(set) var closed = false { didSet { if closed { stopWatchingSight() } } }
   private var navigationQueued = false
-  private var mediaFrames: [String: WKFrameInfo] {
+  var mediaFrames: [String: WKFrameInfo] {
     get { webView?.mediaFrames ?? [:] }
     set { webView?.mediaFrames = newValue }
   }
@@ -33,17 +33,18 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     get { webView?.playingFrames ?? [] }
     set { webView?.playingFrames = newValue }
   }
-  private var muted = false
+  private(set) var muted = false
+  var pageMedia = WebKitPageMedia()
+  var life = WebKitTabLife()
   var sightObserver: NSObjectProtocol?
-  private var errorURL: URL?
+  var errorURL: URL?
   private var committedAt: Double = 0
   private var respondedStatus = 0
   private var committedStatus = 0
-  private var showingError = false
-  private var findText = ""
-  private var findCount = 0
-  private var findActive = 0
+  var showingError = false
+  let finder = WebKitFinder()
   let blocked = WebKitBlockedCount()
+  let safety = WebKitTabSafety()
 
   override var isFlipped: Bool { true }
 
@@ -63,6 +64,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     super.viewDidMoveToWindow()
     if window != nil { followInterfaceScale() }
     watchSight()
+    showNextDialog()
   }
 
   func emit(_ name: String, _ payload: [String: Any] = [:]) {
@@ -93,18 +95,27 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
       emitEverything()
       return
     }
-    let created = WebKitWebView(frame: bounds, configuration: WebKitHub.shared.configuration(profile: profile))
+    if let id = adoptId, WebKitHeldPopup.closedBeforeAdoption(id) {
+      attach(makeView())
+      emit("ready", [:])
+      emit("windowClose")
+      return
+    }
+    let created = makeView()
     attach(created)
     emit("ready", [:])
-    if let url = initialURL, !url.isEmpty { loadWhenBlockerReady(url, in: created) }
+    if let url = initialURL, !url.isEmpty { startFirstPage(url, in: created) }
   }
 
   func relinquish() -> WebKitWebView? {
     guard !closed, let view = webView else { return nil }
     closed = true
     observations = []
+    cancelDialogs()
     WebKitHub.shared.permissions.drop(browserId: browserId)
     if let key = transferKey { WebKitHub.shared.transfers.forgetLive(self, key: key) }
+    WebKitHub.shared.logins.forget(self)
+    WebKitAutofill.shared.forget(self)
     webView = nil
     stopListening(to: view)
     WebKitHub.shared.transfers.unregister(view)
@@ -122,27 +133,31 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     emitZoom()
   }
 
-  private func attach(_ view: WebKitWebView) {
+  func attach(_ view: WebKitWebView) {
     webView = view
+    defer { WebKitHeldPopup.release(view, to: self) }
     WebKitHub.shared.transfers.register(view, tab: self)
     view.navigationDelegate = self
     view.uiDelegate = self
     view.allowsBackForwardNavigationGestures = true
     view.allowsMagnification = true
     view.isInspectable = WebKitHub.inspectable && !WebKitStores.isPrivate(profile)
-    if let color = pageBackgroundColor { view.underPageBackgroundColor = color }
+    if let color = pageBackgroundColor ?? life.contentsBackgroundColor { view.underPageBackgroundColor = color }
     listen(to: view)
     view.frame = bounds
     view.autoresizingMask = [.width, .height]
     addSubview(view)
     updateHidden()
     observe(view)
+    prepareFirstPaint(view)
+    if effectiveMuted { applyMute() }
+    checkSoundRule()
     WebKitHub.shared.permissions.reconcileCapture(view, profile: profile)
     pushFieldProvider()
     updateSight()
   }
 
-  private func observe(_ view: WKWebView) {
+  private func observe(_ view: WebKitWebView) {
     let navigation: (WKWebView) -> Void = { [weak self] _ in self?.queueNavigation() }
     observations = [
       view.observe(\.url) { _, _ in navigation(view) },
@@ -157,7 +172,15 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
       view.observe(\.cameraCaptureState) { [weak self] _, _ in self?.emitMediaAccess() },
       view.observe(\.microphoneCaptureState) { [weak self] _, _ in self?.emitMediaAccess() },
       view.observe(\.magnification) { [weak self] _, _ in self?.emitZoom() },
-    ]
+    ] + mediaWatches(view)
+  }
+
+  func dropViewForDiscard() -> WebKitWebView? {
+    guard let view = webView else { return nil }
+    observations = []
+    webView = nil
+    stopListening(to: view)
+    return view
   }
 
   private func updateHidden() {
@@ -166,11 +189,15 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
 
   func close() {
     guard !closed else { return }
+    lifecycleEnded()
     closed = true
     observations = []
+    cancelDialogs()
     WebKitHub.shared.permissions.drop(browserId: browserId)
     if let key = transferKey { WebKitHub.shared.transfers.forgetLive(self, key: key) }
     guard let view = webView else { return }
+    WebKitHub.shared.logins.forget(self)
+    WebKitAutofill.shared.forget(self)
     webView = nil
     stopListening(to: view)
     if let key = transferKey, WebKitHub.shared.transfers.isPrepared(key) {
@@ -183,7 +210,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     WebKitHub.close(view)
   }
 
-  private func queueNavigation() {
+  func queueNavigation() {
     guard !navigationQueued else { return }
     navigationQueued = true
     DispatchQueue.main.async { [weak self] in
@@ -195,19 +222,21 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
 
   private func emitNavigation() {
     guard let view = webView else { return }
-    let theme = view.themeColor.flatMap(Self.hex)
+    let reported = showingError ? nil : view.reportedTheme
+    let theme = reported?.color ?? view.themeColor.flatMap(Self.hex)
     var navigation: [String: Any] = [
-      "url": view.url?.absoluteString ?? "",
+      "url": (view.url ?? view.backForwardList.currentItem?.url)?.absoluteString ?? "",
       "committedUrl": showingError ? "" : (view.backForwardList.currentItem?.url.absoluteString ?? ""),
       "committedAt": committedAt,
-      "title": showingError ? "Can't Open This Page" : (view.title ?? ""),
+      "title": showingError ? safety.errorTitle : (view.title ?? ""),
       "canGoBack": view.canGoBack,
       "canGoForward": view.canGoForward,
       "isLoading": view.isLoading,
       "themeColor": theme ?? NSNull(),
-      "themeColorSource": theme == nil ? NSNull() : "meta",
+      "themeColorSource": reported?.source ?? (theme == nil ? NSNull() : "meta"),
     ]
     if committedStatus > 0 && !showingError { navigation["httpStatus"] = committedStatus }
+    WebKitTabHistory.scheduleSave(self)
     emit("navigation", navigation)
   }
 
@@ -217,16 +246,19 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     return String(format: "#%02X%02X%02X", max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
   }
 
-  private func emitMediaAccess() {
+  func emitMediaAccess() {
     guard let view = webView else { return }
     emit("mediaAccess", [
-      "camera": view.cameraCaptureState == .active, "microphone": view.microphoneCaptureState == .active, "screen": false,
+      "camera": view.cameraCaptureState == .active, "microphone": view.microphoneCaptureState == .active, "screen": capturesDisplay,
     ])
+    autoPictureInPictureInputsChanged()
   }
 
   func loadURL(_ url: String, userInitiated: Bool) {
+    if wakeDiscarded(loading: url) { return }
     guard let view = webView, let target = URL(string: url) else { return }
     showingError = false
+    safety.trustCheck = nil
     if target.isFileURL {
       view.loadFileURL(target, allowingReadAccessTo: target.deletingLastPathComponent())
     } else {
@@ -234,20 +266,30 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     }
   }
 
-  func goBack() { webView?.goBack() }
-  func goForward() { webView?.goForward() }
+  func goBack() {
+    wakeDiscarded()
+    webView?.goBack()
+  }
+
+  func goForward() {
+    wakeDiscarded()
+    webView?.goForward()
+  }
 
   func go(toHistoryOffset offset: Int) {
+    wakeDiscarded()
     guard let view = webView, let item = view.backForwardList.item(at: offset) else { return }
     view.go(to: item)
   }
 
   func reload() {
+    if wakeDiscarded() { return }
     if showingError, let url = errorURL { return loadURL(url.absoluteString, userInitiated: true) }
     webView?.reload()
   }
 
   func reloadIgnoringCache() {
+    if wakeDiscarded() { return }
     if showingError, let url = errorURL { return loadURL(url.absoluteString, userInitiated: true) }
     webView?.reloadFromOrigin()
   }
@@ -266,13 +308,12 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
   }
 
   func setMuted(_ on: Bool) {
+    let changed = on != muted
     muted = on
-    let code = muteScript
-    runInWorld(code)
-    for frame in mediaFrames.values where !frame.isMainFrame { runInWorld(code, frame: frame) }
+    if changed, on, WebKitWebView.mutesPage { ArdiaEvents.emit("webKit.counted", data: ArdiaConsentStamp.begin().onto(["name": "pageMute"])) }
+    applyMute()
+    if changed { emitMedia() }
   }
-
-  private var muteScript: String { "window.__ardia && window.__ardia.mute(\(muted ? "true" : "false"))" }
 
   func runInWorld(_ code: String, frame: WKFrameInfo? = nil, completion: ((Any?) -> Void)? = nil) {
     guard let view = webView else {
@@ -300,43 +341,6 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
   private func emitZoom(byUser user: Bool = false) {
     guard let view = webView else { return }
     emit("zoom", ["zoom": view.pageZoom, "host": host, "isDefault": abs(view.pageZoom - 1) < 0.001, "pinchScale": view.magnification, "user": user])
-  }
-
-  func find(_ text: String, forward: Bool, findNext: Bool) {
-    guard let view = webView else { return }
-    if text.isEmpty {
-      findText = ""
-      return emit("find", ["count": 0, "active": 0, "final": true])
-    }
-    let fresh = text != findText
-    findText = text
-    let configuration = WKFindConfiguration()
-    configuration.backwards = !forward
-    configuration.caseSensitive = false
-    configuration.wraps = true
-    let quoted = Self.jsString(text)
-    runInWorld("window.__ardia ? window.__ardia.count(\(quoted)) : 0") { [weak self] value in
-      guard let self, self.findText == text else { return }
-      self.findCount = (value as? NSNumber)?.intValue ?? 0
-      view.find(text, configuration: configuration) { [weak self] result in
-        guard let self, self.findText == text else { return }
-        if !result.matchFound {
-          self.findActive = 0
-        } else if fresh || self.findActive == 0 {
-          self.findActive = 1
-        } else if findNext && self.findCount > 0 {
-          self.findActive = forward ? self.findActive % self.findCount + 1 : (self.findActive + self.findCount - 2) % self.findCount + 1
-        }
-        let count = result.matchFound ? max(self.findCount, 1) : 0
-        self.emit("find", ["count": count, "active": min(self.findActive, count), "final": true])
-      }
-    }
-  }
-
-  func stopFinding(_ clearSelection: Bool) {
-    findText = ""
-    findActive = 0
-    if clearSelection { runInWorld("getSelection().removeAllRanges()") }
   }
 
   static func jsString(_ text: String) -> String {
@@ -390,24 +394,6 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     }
   }
 
-  func securityInfo() -> [String: Any] {
-    guard let view = webView, let url = view.url, !showingError else {
-      return ["level": "none", "url": webView?.url?.absoluteString ?? "", "origin": NSNull()]
-    }
-    let scheme = url.scheme?.lowercased() ?? ""
-    let origin = scheme == "http" || scheme == "https" ? Origins.of(url) : nil
-    var info: [String: Any] = ["url": url.absoluteString, "origin": origin ?? NSNull()]
-    switch scheme {
-    case "https":
-      info["level"] = view.hasOnlySecureContent ? "secure" : "mixed"
-      if let trust = view.serverTrust, let certificate = Self.certificate(trust) { info["certificate"] = certificate }
-    case "http": info["level"] = "insecure"
-    case "file": info["level"] = "local"
-    default: info["level"] = "none"
-    }
-    return info
-  }
-
   private func emitSecurity() {
     guard webView != nil else { return }
     emit("security", securityInfo())
@@ -425,12 +411,12 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     case "media":
       guard let dict else { return }
       mediaFrames[frame] = frameInfo
-      if (dict["muted"] as? Bool ?? false) != muted { runInWorld(muteScript, frame: main ? nil : frameInfo) }
+      if !WebKitWebView.mutesPage, (dict["muted"] as? Bool ?? false) != effectiveMuted { runInWorld(muteScript, frame: main ? nil : frameInfo) }
       if dict["playing"] as? Bool == true { playingFrames.insert(frame) } else { playingFrames.remove(frame) }
-      emit("media", ["playing": !playingFrames.isEmpty, "muted": muted])
+      emitMedia()
     case "nowPlaying":
       guard let view = webView else { return }
-      if let dict, !dict.isEmpty { mediaFrames[frame] = frameInfo }
+      if let dict, !dict.isEmpty { mediaFrames[frame] = frameInfo } else if !main, !playingFrames.contains(frame) { mediaFrames.removeValue(forKey: frame) }
       emit("nowPlaying", ["state": view.nowPlaying.noteFrame(frame, page: data, main: main) ?? NSNull()])
     case "pip":
       let active = dict?["active"] as? Bool ?? false
@@ -439,10 +425,12 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     case "mediaFault":
       if let fault = WebKitMediaFaults.event(dict, from: frameInfo, muted: muted, blockerActive: WebKitContentBlocker.shared.isFiltering && !blocked.exemptLoad) { emit("mediaFault", fault) }
     case "status":
-      emit("status", ["text": data as? String ?? ""])
+      noteLinkStatus(data, main: main)
     case "icons":
-      guard main, let urls = dict?["urls"] as? [String], let first = urls.first else { return }
-      emit("favicon", ["url": first, "urls": urls])
+      noteIcons(dict, main: main)
+    case "theme":
+      guard main, let view = webView else { return }
+      noteTheme(dict, in: view)
     case "scroll":
       guard main, let state = dict?["state"] as? String, ["down", "up", "top"].contains(state) else { return }
       emit("scroll", ["state": state])
@@ -450,10 +438,29 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     }
   }
 
+  private static let themeSources: Set<String> = ["meta", "header", "background"]
+
+  private func noteTheme(_ dict: [String: Any]?, in view: WebKitWebView) {
+    let color = (dict?["color"] as? String).flatMap { $0.wholeMatch(of: /#[0-9A-F]{6}/) == nil ? nil : $0 }
+    let source = (dict?["source"] as? String).flatMap { Self.themeSources.contains($0) ? $0 : nil }
+    view.reportedTheme = color.flatMap { color in source.map { WebKitReportedTheme(color: color, source: $0) } }
+    if source == "header" || source == "background", color != nil, !view.sampledThemeCounted {
+      view.sampledThemeCounted = true
+      ArdiaEvents.emit("webKit.counted", data: ArdiaConsentStamp.begin().onto(["name": "sampledTint"]))
+    }
+    queueNavigation()
+  }
+
   func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, preferences: WKWebpagePreferences,
                decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
-    let decide = { (policy: WKNavigationActionPolicy) in decisionHandler(policy, preferences) }
+    let mainFrame = action.targetFrame?.isMainFrame == true
+    let decide = { [weak self] (policy: WKNavigationActionPolicy) in
+      if mainFrame { self?.safety.target.decided(allowed: policy == .allow) }
+      decisionHandler(policy, preferences)
+    }
+    if handlePageAction(action) { return decide(.cancel) }
     guard let url = action.request.url else { return decide(.allow) }
+    if mainFrame { safety.target.began(url) }
     let scheme = url.scheme?.lowercased() ?? ""
     let webSchemes: Set<String> = ["http", "https", "file", "about", "data", "blob", "javascript", "webkit-pdfjs-viewer"]
     if !webSchemes.contains(scheme) {
@@ -465,35 +472,36 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
       if let request = WebKitHub.shared.externalApps.request(url: url, origin: origin, profile: profile) { emit("externalApp", request) }
       return
     }
-    if action.navigationType == .linkActivated, action.targetFrame != nil {
-      let flags = action.modifierFlags
-      if flags.contains(.command) || action.buttonNumber == 2 {
-        decide(.cancel)
-        let disposition = flags.contains(.shift) ? "foreground" : "background"
-        return emit("openWindow", ["url": url.absoluteString, "disposition": disposition, "userGesture": true])
-      }
-      if flags.contains(.option) { return decide(.download) }
-    }
+    if let policy = linkPolicy(for: action, url: url) { return decide(policy) }
+    applyHTTPSPolicy(action, preferences: preferences)
     if action.targetFrame?.isMainFrame == true, !applyBlockerPolicy(action, preferences: preferences, in: webView) { return decide(.cancel) }
-    decide(action.shouldPerformDownload ? .download : .allow)
+    applySiteSettings(action, preferences: preferences, in: webView) { decide(action.shouldPerformDownload ? .download : .allow) }
   }
 
   func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
     let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
     let attachment = disposition.hasPrefix("attachment")
-    if response.isForMainFrame { respondedStatus = (response.response as? HTTPURLResponse)?.statusCode ?? 0 }
-    decisionHandler(!response.canShowMIMEType || (attachment && response.isForMainFrame) ? .download : .allow)
+    let policy: WKNavigationResponsePolicy = !response.canShowMIMEType || (attachment && response.isForMainFrame) ? .download : .allow
+    if response.isForMainFrame {
+      respondedStatus = (response.response as? HTTPURLResponse)?.statusCode ?? 0
+      safety.target.responded(status: respondedStatus, displays: policy == .allow)
+    }
+    noteTransportSecurity(response, in: webView)
+    decisionHandler(policy)
   }
 
   func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+    if navigationAction.targetFrame?.isMainFrame != false { safety.target.ended() }
     adoptDownload(download, from: webView)
   }
 
   func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+    if navigationResponse.isForMainFrame { safety.target.ended() }
     adoptDownload(download, from: webView)
   }
 
   private func adoptDownload(_ download: WKDownload, from webView: WKWebView) {
+    noteNavigationDownload(download, from: webView)
     WebKitHub.shared.downloads.adopt(download, profile: profile, webView: webView)
     let url = download.originalRequest?.url?.absoluteString ?? ""
     emit("downloadNavigation", ["url": url, "committedUrl": webView.backForwardList.currentItem?.url.absoluteString ?? "", "skipped": false])
@@ -508,19 +516,27 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     playingFrames.removeAll()
     mediaFrames.removeAll()
     resetNowPlaying()
+    cancelDialogs()
+    safety.dialogs.pageChanged()
+    safety.target.ended()
+    recordTransportSecurity(webView)
+    WebKitHub.shared.permissions.drop(browserId: browserId)
     self.webView?.captureOrigins.removeAll()
+    self.webView?.reportedTheme = nil
+    self.webView?.sampledThemeCounted = false
     if !host.isEmpty {
       let zoom = WebKitHub.shared.stores.zoom(profile: profile, host: host)
       if abs(webView.pageZoom - zoom) > 0.001 { webView.pageZoom = zoom }
     }
-    if muted { setMuted(true) }
+    audioCommitted()
     emitZoom()
     emitSecurity()
     queueNavigation()
+    siteCommitted()
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-    if muted { setMuted(true) }
+    if !WebKitWebView.mutesPage, effectiveMuted { applyMute() }
     queueNavigation()
   }
 
@@ -533,61 +549,31 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
     respondedStatus = 0
+    safety.target.ended()
+    safety.pendingTransportSecurity = nil
     failed(webView, error)
   }
 
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-    failed(webView, error)
-  }
-
-  private func failed(_ webView: WKWebView, _ error: Error) {
-    let nsError = error as NSError
-    if nsError.code == NSURLErrorCancelled || (nsError.domain == "WebKitErrorDomain" && (nsError.code == 102 || nsError.code == 204)) {
-      return queueNavigation()
-    }
-    let failing = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL) ?? webView.url
-    emit("loadError", ["url": failing?.absoluteString ?? "", "code": nsError.code, "text": nsError.localizedDescription])
-    guard let failing else { return queueNavigation() }
-    errorURL = failing
-    showingError = true
-    webView.loadHTMLString(Self.errorPage(failing, nsError), baseURL: failing)
-  }
-
-  static func errorPage(_ url: URL, _ error: NSError) -> String {
-    let escape = { (text: String) in
-      text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-    }
-    return """
-      <!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>Can't Open This Page</title>
-      <style>body{font:13px -apple-system,system-ui;display:flex;align-items:center;justify-content:center;height:90vh;margin:0;color:#555}
-      @media (prefers-color-scheme: dark){body{color:#bbb;background:#1e1e1e}}main{max-width:460px;text-align:center}
-      h1{font-size:20px;font-weight:600;color:CanvasText;margin:0 0 8px}p{margin:4px 0;word-break:break-word}</style></head>
-      <body><main><h1>Can't open this page</h1><p>\(escape(url.host ?? url.absoluteString))</p><p>\(escape(error.localizedDescription))</p></main></body></html>
-      """
+    failed(webView, error, committed: true)
   }
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    guard webView === self.webView else { return }
+    cancelDialogs()
+    WebKitHub.shared.permissions.drop(browserId: browserId)
     mediaFrames.removeAll()
+    playingFrames.removeAll()
     self.webView?.scriptFrames.removeAll()
     if let view = self.webView { ArdiaWebView.resetFieldProviderPage(view) }
     resetNowPlaying()
+    processTerminated()
+    emitMedia()
     emit("crashed", ["status": 0, "reason": "crashed", "code": 0])
   }
 
   private func resetNowPlaying() {
     if webView?.nowPlaying.reset() == true { emit("nowPlaying", ["state": NSNull()]) }
-  }
-
-  func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction,
-               windowFeatures: WKWindowFeatures) -> WKWebView? {
-    let child = WebKitWebView(frame: .zero, configuration: configuration)
-    child.navigationDelegate = WebKitPopupPolicy.shared
-    let id = WebKitHub.shared.transfers.offer(child)
-    let flags = action.modifierFlags
-    let popup = windowFeatures.width != nil || windowFeatures.height != nil
-    let disposition = flags.contains(.command) || action.buttonNumber == 2 ? (flags.contains(.shift) ? "foreground" : "background") : popup ? "popup" : "foreground"
-    emit("openWindow", ["url": action.request.url?.absoluteString ?? "", "disposition": disposition, "adoptId": id, "userGesture": true])
-    return child
   }
 
   func webViewDidClose(_ webView: WKWebView) {

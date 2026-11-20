@@ -54,6 +54,8 @@ export const LINUX_WORDING: readonly Wording[] = [
       [`keptOnThisMac: "Kept on this Mac"`, `keptOnThisMac: "Kept on this computer"`],
       ["browsing data removed from this Mac and", "browsing data removed from this computer and"],
       ["switched Auto-hide tabs on or off on this Mac,", "switched Auto-hide tabs on or off on this computer,"],
+      ["how many times this Mac's WebKit couldn't mute a whole page", "how many times this computer's WebKit couldn't mute a whole page"],
+      ["and how many times ⌘-scroll changed the zoom", "and how many times Ctrl-scroll changed the zoom"],
       ["more were loaded than your Mac's memory allows for", "more were loaded than your computer's memory allows for"],
       ["turned Minimalism mode on and off on this Mac, from Settings, the View menu or ⌃⌘M,", "turned Minimalism mode on and off on this computer, from Settings, the View menu or Ctrl+Super+M,"],
       ["whether macOS Increase Contrast is on", "whether the desktop's high contrast setting is on"],

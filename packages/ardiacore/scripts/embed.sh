@@ -50,3 +50,9 @@ rules="$repo/packages/ardiacore/vendor/ubol-webkit/rules"
 if [ -n "${UNLOCALIZED_RESOURCES_FOLDER_PATH:-}" ] && [ -f "$rules/rulesets.json" ]; then
   rsync -a --delete "$rules/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/ContentRules/"
 fi
+
+"$here/hsts-preload.sh"
+hsts="$repo/packages/ardiacore/vendor/hsts-preload/hosts"
+if [ -n "${UNLOCALIZED_RESOURCES_FOLDER_PATH:-}" ] && [ -f "$hsts/subdomains.hosts" ]; then
+  rsync -a --delete "$hsts/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/HSTS/"
+fi

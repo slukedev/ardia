@@ -5,6 +5,8 @@ import WebKit
 public class WebKitModule: Module {
   public func definition() -> ModuleDefinition {
     Name(Self.calls.moduleName)
+    Events(Self.calls.domain)
+    Self.calls.forwardEvents(to: self)
 
     Self.calls.function
 
@@ -15,7 +17,7 @@ public class WebKitModule: Module {
       reply.ok(WebKitDownloads.removeStaging(try args.text("path")))
     },
     "endPrivateSession": { args, reply in
-      WebKitHub.shared.endPrivateSession(try args.text("session"))
+      WebKitHub.endPrivateSessionIfStarted(try args.text("session"))
       reply.ok()
     },
     "cookieStoreKey": { args, reply in reply.ok(WebKitHub.shared.stores.id(of: args.profile).wireKey) },
@@ -23,8 +25,17 @@ public class WebKitModule: Module {
       let cookies = try args.dicts("cookies")
       WebKitHub.shared.importCookies(cookies, profile: args.profile, storeKey: try args.text("storeKey")) { reply.ok($0) }
     },
+    "setFraudWarnings": { args, reply in
+      WebKitFraudWarnings.set(try args.bool("enabled"))
+      reply.ok()
+    },
     "setZoom": { args, reply in
       WebKitHub.shared.setZoom(try args.double("zoom"), profile: args.profile, host: try args.text("host").lowercased())
+      reply.ok()
+    },
+    "notificationAction": { args, reply in
+      let action = try args.text("action")
+      if WebKitHub.started, action == "click" || action == "close" { WebKitHub.shared.notifications.act(try args.text("id"), action: action) }
       reply.ok()
     },
     "passkeyAccess": { _, reply in reply.ok(WebKitPasskeys.access()) },

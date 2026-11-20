@@ -2,6 +2,7 @@
 #import "ArdiaRuntime.h"
 #import "ArdiaLaunchConfig.h"
 #import "ArdiaPictureInPicture.h"
+#import "ArdiaChromeWindowHost.h"
 
 #import <objc/runtime.h>
 
@@ -202,7 +203,8 @@ BOOL TracingPictureInPicture() {
 + (BOOL)playsForAutoPictureInPictureInWindow:(NSWindow *)window {
   for (ArdiaWebView *view in LiveViews().allObjects)
     if (view.window == window && view->_visible && view->_tab && view.playsForAutoPictureInPicture) return YES;
-  return NO;
+  BOOL (^webKitPlays)(NSWindow *) = ArdiaChromeWindowHost.playsForAutoPictureInPictureHandler;
+  return webKitPlays && webKitPlays(window);
 }
 
 - (void)autoPictureInPictureInputsChanged {

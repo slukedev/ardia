@@ -57,6 +57,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface ArdiaWebView (Tab)
 + (void)setLittleArdiaOpensNewTabLinks:(BOOL)enabled NS_SWIFT_NAME(setLittleArdiaOpensNewTabLinks(_:));
++ (BOOL)littleArdiaOpensNewTabLinksInPlace;
 + (void)setPopupsOpenAsTabs:(BOOL)enabled NS_SWIFT_NAME(setPopupsOpenAsTabs(_:));
 - (void)resolveUnresponsive:(BOOL)terminate NS_SWIFT_NAME(resolveUnresponsive(terminate:));
 - (NSString *)discard:(BOOL)unload NS_SWIFT_NAME(discard(unload:));
@@ -190,10 +191,14 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setSplitLinkModifier:(NSString *)modifier;
 + (void)setPeekOtherSiteTabs:(NSArray<NSString *> *)tabIds;
 + (BOOL)devPostPeekMouseUp:(NSString *)keys over:(NSString *)transferKey;
++ (NSString *)peekModifierInUse;
++ (NSString *)splitLinkModifierInUse;
++ (BOOL)peeksLinksToOtherSitesInTab:(nullable NSString *)transferKey NS_SWIFT_NAME(peeksLinksToOtherSites(inTab:));
 @end
 
 @interface ArdiaWebView (ContextMenu)
 + (void)setSearchEngineName:(NSString *)name;
++ (NSString *)searchEngineNameInUse;
 + (void)removeSharedImage:(NSURL *)file NS_SWIFT_NAME(removeSharedImage(_:));
 + (void)removeSharedImages;
 @end

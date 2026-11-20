@@ -7,10 +7,17 @@ enum Origins {
   static func of(_ url: URL) -> String? {
     guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(), !host.isEmpty else { return nil }
     let port = url.port.flatMap { $0 == defaultPorts[scheme] ? nil : $0 }
-    return "\(scheme)://\(host)" + (port.map { ":\($0)" } ?? "")
+    let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+    return "\(scheme)://\(bracketed)" + (port.map { ":\($0)" } ?? "")
   }
 
   static func of(_ origin: WKSecurityOrigin) -> String {
-    "\(origin.protocol.lowercased())://\(origin.host.lowercased())" + (origin.port > 0 ? ":\(origin.port)" : "")
+    let host = origin.host.lowercased()
+    let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+    return "\(origin.protocol.lowercased())://\(bracketed)" + (origin.port > 0 ? ":\(origin.port)" : "")
+  }
+
+  static func site(_ origin: WKSecurityOrigin) -> String? {
+    origin.protocol.isEmpty || origin.host.isEmpty ? nil : of(origin)
   }
 }

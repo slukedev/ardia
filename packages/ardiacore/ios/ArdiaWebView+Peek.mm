@@ -202,6 +202,18 @@ static NSString *LinkKeyAction(NSString *key) {
     if (view->_transferKey.length && [changed containsObject:view->_transferKey]) [view pushPeekModifier];
 }
 
++ (NSString *)peekModifierInUse {
+  return gPeekModifier;
+}
+
++ (NSString *)splitLinkModifierInUse {
+  return SplitLinkModifier();
+}
+
++ (BOOL)peeksLinksToOtherSitesInTab:(NSString *)transferKey {
+  return transferKey.length && [gPeekOtherSiteTabs containsObject:transferKey];
+}
+
 - (BOOL)peeksLinksToOtherSites {
   return _transferKey.length && [gPeekOtherSiteTabs containsObject:_transferKey];
 }

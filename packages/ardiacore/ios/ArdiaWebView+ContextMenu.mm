@@ -234,6 +234,10 @@ NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
   gSearchEngineName = name.length ? [name copy] : @"Google";
 }
 
++ (NSString *)searchEngineNameInUse {
+  return gSearchEngineName;
+}
+
 + (void)removeSharedImage:(NSURL *)file {
   NSString *own = gOwnFolder;
   if (!file.fileURL || !own) return;

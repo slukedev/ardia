@@ -22,7 +22,7 @@ test("every setting is either on the config allowlist or deliberately left out, 
   assert.deepEqual([...excluded].sort(), [
     "allowJavaScriptFromAppleEvents", "cliControl", "customSearchEngines", "customSearchUrl", "defaultProfileId", "engineMode", "engineSwitchAsksAboutUnsavedWork",
     "engineSwitchKeepsPage", "extensionSearchEngines", "newTabUrl", "offerWebKitForProtectedVideo", "pageEngine",
-    "protectedVideoInWebKit", "websiteEngines",
+    "protectedVideoInWebKit", "webKitFraudWarnings", "websiteEngines",
   ]);
 });
 

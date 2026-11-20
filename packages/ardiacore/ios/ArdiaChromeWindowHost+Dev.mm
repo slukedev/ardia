@@ -172,6 +172,7 @@ NSString *FakeActiveClicks(NSWindow *, NSString *) {
   dispatch_once(&once, ^{
     NSMutableSet<Class> *classes = [NSMutableSet setWithObject:NSTextView.class];
     if (Class page = NSClassFromString(@"RenderWidgetHostViewCocoa")) [classes addObject:page];
+    if (Class webKit = NSClassFromString(@"WKWebView")) [classes addObject:webKit];
     for (Class cls in classes) {
       SEL sel = @selector(acceptsFirstMouse:);
       ReplaceMethod(cls, sel, ^id(IMP original) {

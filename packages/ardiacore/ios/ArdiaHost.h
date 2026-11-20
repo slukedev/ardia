@@ -58,6 +58,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface ArdiaHost (NavigationDownloads)
+
++ (void)noteNavigationDownload:(NSString *)url profile:(NSString *)profile NS_SWIFT_NAME(noteNavigationDownload(_:profile:));
++ (BOOL)wasNavigationDownload:(NSString *)url profile:(NSString *)profile NS_SWIFT_NAME(wasNavigationDownload(_:profile:));
+
+@end
+
 @interface ArdiaHost (Launch)
 
 + (int)runWithArgc:(int)argc

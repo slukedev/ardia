@@ -16,6 +16,7 @@ using namespace ardia_window;
 namespace {
 
 BOOL (^gShouldClose)(NSWindow *);
+BOOL (^gPlaysForAutoPictureInPicture)(NSWindow *);
 
 void (^gSwapped)(NSWindow *, NSWindow *);
 
@@ -327,6 +328,22 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
 
 + (BOOL)userSeesWindow:(NSWindow *)window {
   return [ArdiaWindowController userSees:window];
+}
+
++ (BOOL)userSeesOnlyThroughWindowServer:(NSWindow *)window {
+  return [ArdiaWindowController userSeesOnlyThroughWindowServer:window];
+}
+
++ (void)reconsiderSightOfWindow:(NSWindow *)window {
+  [ArdiaWindowController reconsiderSightOf:window];
+}
+
++ (void)setPlaysForAutoPictureInPictureHandler:(BOOL (^)(NSWindow *))handler {
+  gPlaysForAutoPictureInPicture = [handler copy];
+}
+
++ (BOOL (^)(NSWindow *))playsForAutoPictureInPictureHandler {
+  return gPlaysForAutoPictureInPicture;
 }
 
 + (void)setShouldCloseHandler:(BOOL (^)(NSWindow *))handler {

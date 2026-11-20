@@ -56,3 +56,15 @@ void ForgetPrivateNavigationDownloads(NSString *profile) {
 }
 
 }
+
+@implementation ArdiaHost (NavigationDownloads)
+
++ (void)noteNavigationDownload:(NSString *)url profile:(NSString *)profile {
+  ardia_host::NoteNavigationDownload(url, profile);
+}
+
++ (BOOL)wasNavigationDownload:(NSString *)url profile:(NSString *)profile {
+  return ardia_host::WasNavigationDownload(url, profile);
+}
+
+@end

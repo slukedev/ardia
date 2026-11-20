@@ -181,6 +181,7 @@ export const SETTING_SPECS = {
   offerWebKitForProtectedVideo: flag(true),
   engineSwitchKeepsPage: flag(true),
   engineSwitchAsksAboutUnsavedWork: flag(true),
+  webKitFraudWarnings: flag(false),
   launchActions: shaped<string[]>([], (v) => isStringList(v) && v.length <= 20, { type: "array", items: { type: "string" }, maxItems: 20 }),
   omniboxProviders: shaped<ProviderEntry[]>([], isProviderEntryList, PROVIDERS_SCHEMA),
   readerTextSize: oneOf(READER_SIZE_NAMES, "medium", SYNCED),

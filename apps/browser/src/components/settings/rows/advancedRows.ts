@@ -100,6 +100,14 @@ export const advancedRows = {
     {
       section: "WebKit pages",
       rows: {
+        webKitFraudWarnings: {
+          title: "Warn about fraudulent websites",
+          explained: true,
+          description: "WebKit pages check addresses against Google's or Tencent's Safe Browsing lists and warn before a deceptive site opens.",
+          keywords: ["safe browsing", "phishing", "malware", "fraud", "deceptive", "security", "warning"],
+          shown: webKitInUse,
+          needs: NEEDS_WEBKIT,
+        },
         enginesDiffer: {
           title: "How engines differ",
           explained: true,

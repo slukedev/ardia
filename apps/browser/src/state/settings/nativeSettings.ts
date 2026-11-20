@@ -1,6 +1,7 @@
 import { setAppearance, setThinScrollBars } from "../../platform/app";
 import { setAutoPictureInPicture, setVideoUpscaling } from "../../platform/media";
 import { setCommandScrollZoom } from "../../platform/siteSettings";
+import { setWebKitFraudWarnings } from "../../platform/webkit";
 import { setPopupsOpenAsTabs } from "../../platform/pageOptions";
 import { setBlockAutoplayEverywhere } from "../../platform/pageOptions";
 import { useBrowser } from "../browser/store";
@@ -16,6 +17,7 @@ const NATIVE_SETTINGS: Mirror[] = [
   mirror("appearance", setAppearance),
   mirror("autoPictureInPicture", setAutoPictureInPicture),
   mirror("videoUpscaling", setVideoUpscaling),
+  mirror("webKitFraudWarnings", setWebKitFraudWarnings),
   mirror("popupsOpenAsTabs", setPopupsOpenAsTabs),
   mirror("blockAutoplayEverywhere", setBlockAutoplayEverywhere),
   mirror("pressMotion", setPressMotion),

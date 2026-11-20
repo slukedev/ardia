@@ -77,9 +77,30 @@ final class WebKitStores {
   func dataStore(for profile: String) -> WKWebsiteDataStore {
     if Self.isPrivate(profile) { return session(ArdiaHost.baseProfile(of: profile)).store }
     if let store = persistent[profile] ?? deletedProfiles[profile] { return store }
-    let store = WKWebsiteDataStore(forIdentifier: Self.storeIdentifier(profile))
+    let identifier = Self.storeIdentifier(profile)
+    let store = WKWebsiteDataStore(forIdentifier: identifier)
     persistent[profile] = store
+    UserDefaults.standard.set(true, forKey: Self.storeMadeKey(identifier))
+    WebKitHub.shared.notifications.attachWorkers(to: store, profile: profile)
     return store
+  }
+
+  func hasStore(for profile: String) -> Bool {
+    if Self.isPrivate(profile) { return privateSessions[ArdiaHost.baseProfile(of: profile)] != nil }
+    let identifier = Self.storeIdentifier(profile)
+    return persistent[profile] != nil || deletedProfiles[profile] != nil || UserDefaults.standard.bool(forKey: Self.storeMadeKey(identifier)) || Self.storeOnDisk(identifier)
+  }
+
+  static func storeMadeKey(_ identifier: UUID) -> String { "ardia.webkit.storeMade.\(identifier.uuidString)" }
+
+  static func storeOnDisk(_ identifier: UUID) -> Bool {
+    guard let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else { return true }
+    let webKit = library.appendingPathComponent("WebKit", isDirectory: true)
+    let roots = [Bundle.main.bundleIdentifier.map { webKit.appendingPathComponent($0, isDirectory: true) }, webKit].compactMap { $0 }
+    let names = [identifier.uuidString, identifier.uuidString.lowercased()]
+    return roots.contains { root in
+      names.contains { FileManager.default.fileExists(atPath: root.appendingPathComponent("WebsiteDataStore", isDirectory: true).appendingPathComponent($0).path) }
+    }
   }
 
   func liveDataStore(for profile: String, wireKey: String) -> WKWebsiteDataStore? {

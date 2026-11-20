@@ -84,7 +84,7 @@ export function SiteControlsPanel({
   const pageEngine = usePageEngine(tabId);
   const webkitPage = pageEngine === "webkit";
   const permissionList = sitePermissionsFor(pageEngine);
-  const sound = { siteMuted: useMuteState(tabId) === "site", soundBlocked: !webkitPage && settings?.sound?.value === "block" };
+  const sound = { siteMuted: useMuteState(tabId) === "site", soundBlocked: settings?.sound?.value === "block" };
   const engineRule = useEngineRule(url);
   const recommendedEngine = useRecommendedEngine(url);
   const streamingSite = useStreamingSite(url);

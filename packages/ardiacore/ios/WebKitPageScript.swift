@@ -15,7 +15,11 @@ enum WebKitPageScript {
     return String(script[from.lowerBound..<to.lowerBound])
   }()
 
-  static let source = #"""
+  static let source = [media, theme, scroll, selection, fieldProviders, commands].joined(separator: "\n\n")
+
+  static let mediaBridge = mediaSessionBridge + appBadgeBridge
+
+  static let media = #"""
 (() => {
   if (window.__ardia) return;
   const isTop = window === window.top;
@@ -35,6 +39,7 @@ enum WebKitPageScript {
   let lastHeard = null;
   let pageActions = [];
   let pagePosition = null;
+  const handlers = Object.create(null);
   const allMedia = () => {
     const list = Array.from(document.querySelectorAll("video, audio"));
     for (const m of detached) if (!list.includes(m)) list.push(m);
@@ -190,6 +195,18 @@ enum WebKitPageScript {
     },
     true,
   );
+  if (isTop)
+    document.addEventListener(
+      "ardia:app-badge",
+      (e) => {
+        let data = null;
+        try {
+          data = typeof e.detail === "string" ? JSON.parse(e.detail) : null;
+        } catch (error) {}
+        if (data && typeof data === "object") post("appBadge", data);
+      },
+      true,
+    );
   const pip = (on) => post("pip", { active: on });
   document.addEventListener("enterpictureinpicture", () => pip(true), true);
   document.addEventListener("leavepictureinpicture", () => pip(false), true);
@@ -198,6 +215,12 @@ enum WebKitPageScript {
     (e) => e.target instanceof HTMLVideoElement && pip(e.target.webkitPresentationMode === "picture-in-picture"),
     true,
   );
+  addEventListener("pagehide", () => {
+    if (isTop) return;
+    post("media", { playing: false, muted });
+    post("nowPlaying", null);
+  });
+  addEventListener("pageshow", (e) => e.persisted && schedule());
 
   let hovered = "";
   document.addEventListener(
@@ -207,131 +230,65 @@ enum WebKitPageScript {
       const href = link ? link.href : "";
       if (href === hovered) return;
       hovered = href;
-      post("status", href);
+      post("status", { text: href.slice(0, 8192), y: e.clientY, height: innerHeight });
     },
     true,
   );
-  document.addEventListener("mouseleave", () => hovered && post("status", (hovered = "")), true);
+  document.addEventListener("mouseleave", () => hovered && post("status", { text: (hovered = "") }), true);
 
+  let sentIcons = "";
   const sendIcons = () => {
     if (!isTop) return;
     const links = Array.from(document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"], link[rel~="apple-touch-icon"]'));
-    const urls = links.map((l) => l.href).filter((h) => /^(https?|data):/.test(h));
+    const urls = links.map((l) => l.href).filter((h) => /^(https?|data):/.test(h)).slice(0, 32);
     if (!urls.length && /^https?:$/.test(location.protocol)) urls.push(location.origin + "/favicon.ico");
-    if (urls.length) post("icons", { urls });
+    const key = urls.join("\n");
+    if (!urls.length || key === sentIcons) return;
+    const changed = !!sentIcons;
+    sentIcons = key;
+    post("icons", { urls, changed });
   };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", sendIcons, { once: true });
-  else sendIcons();
+  let iconsQueued = false;
+  const queueIcons = () => {
+    if (iconsQueued) return;
+    iconsQueued = true;
+    setTimeout(() => {
+      iconsQueued = false;
+      sendIcons();
+    }, 0);
+  };
+  const touchesIcon = (records) => {
+    for (const r of records) {
+      if (r.type === "attributes") {
+        if (r.target.nodeName === "LINK") return true;
+        continue;
+      }
+      for (const n of r.addedNodes) if (n.nodeName === "LINK") return true;
+      for (const n of r.removedNodes) if (n.nodeName === "LINK") return true;
+    }
+    return false;
+  };
+  const watchIcons = () => {
+    sendIcons();
+    if (!isTop || !document.head) return;
+    new MutationObserver((records) => touchesIcon(records) && queueIcons()).observe(document.head, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["href", "rel"],
+    });
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchIcons, { once: true });
+  else watchIcons();
   addEventListener("load", sendIcons, { once: true });
+  addEventListener("pageshow", (e) => {
+    if (!e.persisted) return;
+    sentIcons = "";
+    sendIcons();
+  });
+"""#
 
-  if (isTop) {
-    const scrollDirection = () => {
-      const DOWN = 24, UP = 12, MIN_RANGE = 120, SETTLE = 300, GESTURE = 300;
-      const paged = (snap, vertical) => {
-        const [axis, strictness] = snap.split(" ");
-        return strictness === "mandatory" && (axis === "y" || axis === "both" || axis === (vertical ? "inline" : "block"));
-      };
-      let anchor = 0, last = 0, lastAt = -1e9, settleUntil = -1e9, budget = 0, height = 0, sent = null, gestureSent = false, heading = 0;
-      const resized = (viewport, now) => {
-        if (now >= settleUntil) budget = 0;
-        if (height && viewport !== height) {
-          settleUntil = now + SETTLE;
-          budget += Math.abs(viewport - height) + 2;
-        }
-        height = viewport;
-      };
-      return {
-        resized,
-        rebase(y) {
-          anchor = last = y;
-        },
-        wheeled(deltaX, deltaY, pinch) {
-          if (pinch || !deltaY) {
-            if (pinch || deltaX) heading = 0;
-            return;
-          }
-          heading = deltaY > 0 ? 1 : -1;
-        },
-        undirected() {
-          heading = 0;
-        },
-        scrolled(y, range, viewport, now, user, snap = "", vertical = false) {
-          resized(viewport, now);
-          if (now - lastAt > GESTURE) {
-            gestureSent = false;
-            anchor = last;
-          }
-          lastAt = now;
-          const moved = y - last;
-          last = y;
-          if (budget > 0 && moved) {
-            const absorbed = Math.min(budget, Math.abs(moved));
-            budget -= absorbed;
-            anchor += moved > 0 ? absorbed : -absorbed;
-          }
-          let state = null;
-          if (y <= 2) state = "top";
-          else if (!user || moved * heading < 0) anchor = y;
-          else if (y - anchor >= DOWN) {
-            if (range >= MIN_RANGE && !paged(snap, vertical)) state = "down";
-            else anchor = y;
-          } else if (anchor - y >= UP) state = "up";
-          else if (sent === "down" ? gestureSent && y > anchor : y < anchor) anchor = y;
-          if (state) anchor = y;
-          if (!state || (state === sent && (state !== "down" || gestureSent))) return null;
-          sent = state;
-          if (state === "down") gestureSent = true;
-          return state;
-        },
-      };
-    };
-    const direction = scrollDirection();
-    let scroller = null;
-    let scrollTarget = null;
-    let inputAt = -1e9;
-    const noteInput = () => {
-      inputAt = performance.now();
-      if (!scroller && document.scrollingElement) direction.rebase((scroller = document.scrollingElement).scrollTop);
-    };
-    const noteUndirectedInput = () => {
-      direction.undirected();
-      noteInput();
-    };
-    addEventListener(
-      "wheel",
-      (e) => {
-        direction.wheeled(e.deltaX, e.deltaY, e.ctrlKey);
-        noteInput();
-      },
-      { passive: true, capture: true },
-    );
-    for (const type of ["keydown", "mousedown", "touchstart"]) addEventListener(type, noteUndirectedInput, { passive: true, capture: true });
-    addEventListener("mousemove", (e) => e.buttons && noteUndirectedInput(), { passive: true, capture: true });
-    const measureScroll = () => {
-      try {
-        const target = scrollTarget;
-        scrollTarget = null;
-        const doc = document.scrollingElement || document.documentElement;
-        const el = target === document || target === doc ? doc : target;
-        if (!el || !doc || (el !== doc && (el.clientHeight < innerHeight * 0.5 || el.clientWidth < innerWidth * 0.5))) return;
-        if (el !== scroller) direction.rebase((scroller = el).scrollTop);
-        const now = performance.now();
-        const style = getComputedStyle(el === doc ? document.documentElement : el);
-        const state = direction.scrolled(el.scrollTop, el.scrollHeight - el.clientHeight, innerHeight, now, now - inputAt < 1000, style.scrollSnapType, /^(vertical|sideways)/.test(style.writingMode));
-        if (state) post("scroll", { state });
-      } catch (e) {}
-    };
-    addEventListener(
-      "scroll",
-      (e) => {
-        if (!scrollTarget) requestAnimationFrame(measureScroll);
-        scrollTarget = e.target;
-      },
-      { passive: true, capture: true },
-    );
-    addEventListener("resize", () => direction.resized(innerHeight, performance.now()));
-  }
-
+  static let fieldProviders = #"""
   const guard = (fn) =>
     function () {
       try {
@@ -369,7 +326,9 @@ enum WebKitPageScript {
   });
   post("fieldProviderHello", null);
   addEventListener("pageshow", (e) => e.isTrusted && e.persisted && post("fieldProviderHello", null));
+"""#
 
+  static let commands = #"""
   window.__ardia = {
     fieldProvider(state) {
       fieldProviders.configure(state);
@@ -433,6 +392,9 @@ enum WebKitPageScript {
       else return false;
       return true;
     },
+    selectionPopover(on) {
+      if (handlers.selectionPopover) handlers.selectionPopover(on);
+    },
     count(text) {
       if (!text || !document.body) return 0;
       const haystack = document.body.innerText.toLowerCase();
@@ -442,133 +404,6 @@ enum WebKitPageScript {
       return n;
     },
   };
-})();
-"""#
-
-  static let mediaBridge = #"""
-(() => {
-  const apply = Reflect.apply;
-  const dispatch = EventTarget.prototype.dispatchEvent;
-  const listen = EventTarget.prototype.addEventListener;
-  const preventDefault = Event.prototype.preventDefault;
-  const detailOf = Object.getOwnPropertyDescriptor(CustomEvent.prototype, "detail").get;
-  const connected = Object.getOwnPropertyDescriptor(Node.prototype, "isConnected").get;
-  const { stringify, parse } = JSON;
-  const Custom = CustomEvent;
-  const Mouse = MouseEvent;
-  const now = Date.now;
-  const doc = document;
-  const NativePromise = Promise;
-  const then = Promise.prototype.then;
-  const sites = \#(WebKitMediaFaults.sitesJSON);
-  const watched = location.protocol === "https:" && sites.some((site) => location.hostname === site || location.hostname.endsWith("." + site));
-  const noop = () => {};
-  const reported = Object.create(null);
-  const fault = (reason) => {
-    reported[reason] = (reported[reason] || 0) + 1;
-    if (reported[reason] > 20) return;
-    apply(dispatch, doc, [new Custom("ardia:media-fault", { detail: reason })]);
-  };
-  const observe = (promise, onValue, onError) =>
-    apply(then, promise, [
-      (value) => {
-        try {
-          onValue(value);
-        } catch (e) {}
-        return value;
-      },
-      (error) => {
-        try {
-          onError(error);
-        } catch (e) {}
-        throw error;
-      },
-    ]);
-  const handedOver = new WeakSet();
-  const errorsHeard = new WeakSet();
-  const errorEventsCounted = new WeakSet();
-  const mediaProto = HTMLMediaElement.prototype;
-  const play = mediaProto.play;
-  mediaProto.play = function () {
-    if (!handedOver.has(this) && !apply(connected, this, [])) {
-      handedOver.add(this);
-      try {
-        apply(dispatch, doc, [new Mouse("ardia:media-element", { relatedTarget: this })]);
-      } catch (e) {}
-    }
-    if (watched && !errorsHeard.has(this) && !apply(connected, this, [])) {
-      errorsHeard.add(this);
-      apply(listen, this, ["error", reportMediaError]);
-    }
-    const result = apply(play, this, arguments);
-    return watched && result instanceof NativePromise ? observe(result, noop, (error) => fault("play_rejected_" + playRejection(error))) : result;
-  };
-
-\#(WebKitMediaFaults.pageScript)
-
-  const session = navigator.mediaSession;
-  const proto = session && Object.getPrototypeOf(session);
-  if (!proto) return;
-  const handlers = new Map();
-  let position = null;
-  let samples = 0;
-  const notify = () => {
-    try {
-      apply(dispatch, doc, [new Custom("ardia:media-session", { detail: stringify({ actions: Array.from(handlers.keys()), position }) })]);
-    } catch (e) {}
-  };
-  const setActionHandler = proto.setActionHandler;
-  if (typeof setActionHandler === "function") {
-    proto.setActionHandler = function (action, handler) {
-      const result = apply(setActionHandler, this, arguments);
-      if (typeof handler === "function") handlers.set(String(action), handler);
-      else handlers.delete(String(action));
-      notify();
-      return result;
-    };
-  }
-  const setPositionState = proto.setPositionState;
-  if (typeof setPositionState === "function") {
-    proto.setPositionState = function (state) {
-      const result = apply(setPositionState, this, arguments);
-      position =
-        state && typeof state === "object"
-          ? { duration: +state.duration, position: +(state.position || 0), playbackRate: +(state.playbackRate || 1), at: now(), id: ++samples, playing: this.playbackState === "playing" }
-          : null;
-      notify();
-      return result;
-    };
-  }
-  for (const name of ["metadata", "playbackState"]) {
-    const d = Object.getOwnPropertyDescriptor(proto, name);
-    if (!d || !d.set) continue;
-    Object.defineProperty(proto, name, {
-      ...d,
-      set(value) {
-        apply(d.set, this, [value]);
-        notify();
-      },
-    });
-  }
-  apply(listen, doc, [
-    "ardia:media-action",
-    (e) => {
-      let request = null;
-      try {
-        request = parse(apply(detailOf, e, []));
-      } catch (error) {}
-      const handler = request && typeof request.action === "string" ? handlers.get(request.action) : null;
-      if (typeof handler !== "function") return;
-      apply(preventDefault, e, []);
-      const details = { action: request.action };
-      if (typeof request.seekOffset === "number") details.seekOffset = request.seekOffset;
-      if (typeof request.seekTime === "number") details.seekTime = request.seekTime;
-      try {
-        handler(details);
-      } catch (error) {}
-    },
-    true,
-  ]);
 })();
 """#
 }
