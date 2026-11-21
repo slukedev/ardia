@@ -678,6 +678,7 @@ const fakeModules = {
     importCookies: ({ cookies }) => cookies.length,
     passkeyAccess: () => ({ entitled: false, status: "entitlementRequired" }),
     requestPasskeyAccess: () => ({ entitled: false, status: "entitlementRequired" }),
+    setFraudWarnings: () => null,
   }),
   ArdiaSwipe: {
     haptic: () => {},

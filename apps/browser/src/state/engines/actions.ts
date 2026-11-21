@@ -114,7 +114,7 @@ export async function goBackAcrossEngines(tabId: string, mayAct: () => boolean =
   if (!leaving || !holds() || !now || pageUrl(now) !== from || pageOf(tabId).engineBack !== back || !mayAct()) return false;
   patchPage(tabId, { engineBack: null });
   const held = await holdPageForSwap(tabId, tabEngine(store(), tabId), back.engine, back.url, false, holds);
-  if (!holds() || pageUrl(store().tabs[tabId]) !== from) {
+  if (!holds() || pageUrl(store().tabs[tabId]) !== from || !mayAct()) {
     dropSwap(tabId, held);
     return false;
   }

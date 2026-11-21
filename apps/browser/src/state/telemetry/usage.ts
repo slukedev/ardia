@@ -227,7 +227,6 @@ export function noteSidebarPeek(bounce: boolean) {
 }
 
 export const noteSettingsSearchReveal = (via: "keyboard" | "click", rank: number, unshown: boolean) => void (counts[via === "keyboard" ? "settingsSearchKeyboardReveals" : "settingsSearchClickReveals"]++, counts[rank === 0 ? "settingsSearchTopPicks" : rank < 3 ? "settingsSearchTop3Picks" : "settingsSearchLowerPicks"]++, unshown && counts.settingsSearchUnshownReveals++);
-
 export const noteSettingsSearch = (event: "started" | "empty" | "dropped" | "keys" | "keysOpened" | "shortcutsTyped" | "shortcutsRecorded" | "shortcutsEmpty", consent?: ConsentToken | null) => bump(consent, { [({ started: "settingsSearches", empty: "settingsSearchesEmpty", dropped: "settingsSearchesDropped", keys: "settingsSearchKeySearches", keysOpened: "settingsSearchKeyHitOpens", shortcutsTyped: "shortcutsKeySearchesTyped", shortcutsRecorded: "shortcutsKeySearchesRecorded", shortcutsEmpty: "shortcutsKeySearchesEmpty" } as const)[event]]: 1 });
 export const noteWebKitLimits = (event: "engineRow" | "enginesPane") => void counts[({ engineRow: "webKitLimitsFromEngineRow", enginesPane: "webKitLimitsFromEnginesPane" } as const)[event]]++;
 
